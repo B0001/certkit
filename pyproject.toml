@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "certkit"
+version = "0.1.0"
+description = "Certificate format and independent checker for numerical claims"
+requires-python = ">=3.9"
+dependencies = []          # the checker has none, by design
+
+[project.optional-dependencies]
+producer = ["numpy>=1.24"]
+dev = ["pytest>=7", "numpy>=1.24"]
+
+[project.scripts]
+certkit = "certkit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["certkit*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

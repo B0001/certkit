@@ -1,0 +1,90 @@
+{
+  "kind": "pauli_sum_real",
+  "qubits": 11,
+  "terms": [
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "ZZIIIIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IZZIIIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIZZIIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIZZIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIZZIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIZZIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIZZIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIIZZII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIIIZZI"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIIIIZZ"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "XIIIIIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IXIIIIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIXIIIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIXIIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIXIIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIXIIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIXIIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIIXIII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIIIXII"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIIIIXI"
+    },
+    {
+      "coeff": "-0x1.0000000000000p+0",
+      "string": "IIIIIIIIIIX"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schema": "certkit/1",
+  "claim": {
+    "kind": "lambda_min_enclosure",
+    "operator_ref": "blake2b16:31d5d26cfdccb7f2099e25325bb7014a",
+    "enclosure": {
+      "lo": "-0x1.8c33542d07d61p+1",
+      "hi": "-0x1.8c33541fbc7ffp+1"
+    }
+  },
+  "witness": {
+    "rule": "temple_inertia",
+    "vector": [
+      "0x1.adf9a64338d58p-7",
+      "-0x1.440dad85022f0p-2",
+      "0x1.21e9d62887760p-2",
+      "0x1.f544fd624404fp-5",
+      "0x1.a3249f04de6e8p-4",
+      "-0x1.49a0c642c5ae6p-1",
+      "0x1.10023924ffde6p-3",
+      "-0x1.22bbf9b7f6e54p-1",
+      "-0x1.20b31681b3da0p-7",
+      "-0x1.ccfb5b6b1920bp-3"
+    ],
+    "beta": "-0x1.51545f93003dap+1"
+  },
+  "producer": {
+    "name": "certkit.producer",
+    "backend": "numpy.linalg.eigh"
+  },
+  "content_hash": "blake2b16:c3a622317a159527f95e12e41e2d7f30"
+}

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Test and tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Lean
+lean/**/build/
+lean/**/.lake/
+
+# CLI output
+out/
+
+# beads: the embedded Dolt database is local state, not source. The portable
+# form is the JSONL export -- see issues.jsonl at the repo root.
+.beads/
+.beads.gate.lock
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

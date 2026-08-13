@@ -1,0 +1,50 @@
+[
+  {
+    "schema": "certkit/1",
+    "claim": {
+      "operator_ref": "blake2b16:58536a3efe64af0c75497661a44e4751",
+      "kind": "eigenvalue_count_below",
+      "beta": "-0x1.3e65ddde9203ap+1",
+      "count": 1
+    },
+    "witness": {
+      "rule": "inertia"
+    },
+    "producer": {
+      "name": "certkit.producer",
+      "backend": "numpy"
+    },
+    "content_hash": "blake2b16:bf513971a56bfc1e860e6b1006d4b17e"
+  },
+  {
+    "schema": "certkit/1",
+    "claim": {
+      "operator_ref": "blake2b16:58536a3efe64af0c75497661a44e4751",
+      "kind": "lambda_min_enclosure",
+      "enclosure": {
+        "lo": "-0x1.95692caf47501p+1",
+        "hi": "-0x1.95692ca1acdc3p+1"
+      }
+    },
+    "witness": {
+      "rule": "temple_ref",
+      "vector": [
+        "0x1.146f0a9c4e73ep-2",
+        "-0x1.e492d8cdb55e0p-6",
+        "-0x1.f6c3ba831453cp-2",
+        "-0x1.787d0f0e57161p-2",
+        "-0x1.448c3d5926344p-1",
+        "-0x1.86352f612e586p-2",
+        "0x1.60910d37de497p-8",
+        "0x1.be1f6df0e1d16p-5"
+      ],
+      "beta": "-0x1.3e65ddde9203ap+1",
+      "gap_ref": "blake2b16:bf513971a56bfc1e860e6b1006d4b17e"
+    },
+    "producer": {
+      "name": "certkit.producer",
+      "backend": "numpy"
+    },
+    "content_hash": "blake2b16:bfb5d501a76a9405d023050cb8734096"
+  }
+]
