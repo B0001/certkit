@@ -37,3 +37,7 @@ out/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Sandbox run output (see sandbox.sh)
+sandbox-handoffs/
+.sandbox.lock/
