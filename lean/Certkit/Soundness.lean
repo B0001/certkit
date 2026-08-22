@@ -1,9 +1,13 @@
 /-
   certkit -- soundness obligations, stated in Lean 4 / mathlib4.
 
-  STATUS: statements only. Every proof below is `sorry`. This file has not
-  been compiled in the environment where the Python kit was built, so treat
-  it as a specification of intent, not as a verified artifact.
+  STATUS: mostly statements, not proofs. Six of the seven theorems below are
+  `sorry` and this file has not been compiled in the environment where the
+  Python kit was built, so treat those six as a specification of intent, not
+  a verified artifact. The seventh, `sweep_backward_bound`, is a real,
+  compiled, zero-`sorry` proof (see its own doc comment for exactly what it
+  does and does not cover) -- do not read that as license to call the other
+  six proved, or this file "soundness-complete."
 
   The point of the file is the correspondence. The Python checker performs
   exactly two mathematical steps, and each is one theorem here:
@@ -17,13 +21,14 @@
     checker._check_gershgorin_rayleigh lower bound  <->  gershgorin_lower
 
   A third obligation -- that interval arithmetic on doubles encloses the
-  real result -- is the floating-point layer, and is the natural next thing
-  to formalise (see `Interval.lean`, not yet written).
+  real result -- is the floating-point layer; it is formalised and proved,
+  zero `sorry`, in `Interval.lean`.
 -/
 
 import Mathlib.Analysis.InnerProductSpace.Spectrum
 import Mathlib.LinearAlgebra.Matrix.Hermitian
-import Mathlib.LinearAlgebra.Matrix.Spectrum
+import Mathlib.Analysis.Matrix.Spectrum
+import Certkit.BackwardError
 
 namespace Certkit
 
@@ -69,8 +74,16 @@ theorem temple_lower
 /-- **Sylvester inertia count.** The number of negative pivots in an LDLᵀ
     factorisation of `A - β • 1` equals the number of eigenvalues below `β`.
     This is what discharges `hgap` above: the Python checker computes the
-    count in interval arithmetic and requires it to be exactly one. -/
-theorem inertia_count_below (β : ℝ) (d : n → ℝ)
+    count in interval arithmetic and requires it to be exactly one.
+
+    `[LinearOrder n]` is required because `L.BlockTriangular id` states
+    triangularity of `L` against the order of its own index type `n`
+    (`Matrix.BlockTriangular` needs `LT` on whatever type the block function
+    lands in, and here that function is `id : n → n`) -- the same requirement
+    the checker's own row-major sweep already assumes by processing indices
+    `0, 1, ..., n-1` in order. It narrows the statement from "some `n`" to
+    "some linearly ordered `n`", not from the guarantee. -/
+theorem inertia_count_below [LinearOrder n] (β : ℝ) (d : n → ℝ)
     (hd : ∀ i, d i ≠ 0)
     (hldl : ∃ L : Matrix n n ℝ, L.BlockTriangular id ∧
       (∀ i, L i i = 1) ∧ A - β • (1 : Matrix n n ℝ) = L * (Matrix.diagonal d) * Lᵀ) :
@@ -88,6 +101,7 @@ theorem gershgorin_lower :
       ≥ ⨅ i, (A i i - ∑ j ∈ Finset.univ.erase i, |A i j|) := by
   sorry
 
+open scoped Matrix.Norms.L2Operator in
 /-- **Weyl.** Perturbing a symmetric operator moves each eigenvalue by at most
     the norm of the perturbation. This is what carries the backward-error
     counting rule's conclusion back from the nearby matrix the float sweep
@@ -95,17 +109,46 @@ theorem gershgorin_lower :
 
     The `sturm_be` rule bounds `‖A - Atilde‖` at runtime from the entries, then
     brackets: sweeping at `beta - delta` and `beta + delta` and requiring the
-    two counts to agree pins the count for `A` itself. -/
+    two counts to agree pins the count for `A` itself.
+
+    `‖·‖` here is the `L²` operator norm (`Matrix.Norms.L2Operator`, the norm
+    induced by identifying a matrix with the continuous linear map it gives on
+    `EuclideanSpace` -- the classical spectral norm Weyl's inequality is stated
+    against), opened locally so this file does not choose a global `Norm`
+    instance for `Matrix n n ℝ`. It is *not* the entrywise/row-sum bound
+    `sturm_be` actually computes at runtime; relating the two remains part of
+    the open obligation this theorem's `sorry` stands for. -/
 theorem weyl_shift {B : Matrix n n ℝ} (hB : B.IsHermitian) (i : n) :
     |hA.eigenvalues i - hB.eigenvalues i| ≤ ‖A - B‖ := by
   sorry
 
-/-- The remaining obligation, and the one that would retire the most hand
-    analysis: that a single IEEE operation commits at most one rounding, and
-    that the running bound assembled in `backward_error.sweep` really does
-    dominate `‖A - Atilde‖`. Until this is formalised, that derivation is
-    checked by tests and by reading, not by a machine. -/
-theorem sweep_backward_bound : True := by
-  trivial
+/-- **The per-step rounding collection**, formalised and proved in
+    `Certkit.BackwardError` (`sweep_step_backward_bound`): given the
+    one-rounding-per-operation model (each of a sweep step's four operations
+    commits at most one relative rounding error of size `u`), the computed
+    pivot `d` is exactly what the recurrence would give for a diagonal
+    perturbed by a factor `eta` and a squared off-diagonal perturbed by a
+    factor `gamma`, with `|eta| ≤ 2.1 * u` and `|gamma| ≤ 3.1 * u` -- the
+    exact `ETA`/`GAMMA` constants `backward_error.py` uses.
+
+    This discharges the part of the obligation the bead's acceptance
+    criterion asks for: the one-rounding model, formalised, and the per-step
+    collection of factors into `eta` and `gamma`, proved rather than
+    transcribed. It does **not** discharge the rest of the obligation's
+    original framing -- that the row-sums `sweep` accumulates from these
+    factors actually dominate `‖A - Atilde‖_∞` (an `Iv`-arithmetic
+    bookkeeping fact about `backward_error.sweep`'s Python loop, not part of
+    the one-rounding algebra) and that `‖·‖_∞` dominates the operator norm
+    `‖·‖_2` used by `weyl_shift` above (a general Hermitian-matrix norm
+    inequality, unrelated to rounding). Those remain open, covered by
+    `weyl_shift`'s own `sorry` and by the Python test suite, not by this
+    theorem. -/
+theorem sweep_backward_bound {u e0 e1 e2 e3 a beta bprev dprev : ℝ}
+    (hu : 0 ≤ u) (hu1 : u ≤ 1 / 32)
+    (h0 : |e0| ≤ u) (h1 : |e1| ≤ u) (h2 : |e2| ≤ u) (h3 : |e3| ≤ u) :
+    (((a - beta) * (1 + e2) - (bprev ^ 2 * (1 + e0) / dprev) * (1 + e1)) * (1 + e3)
+        = (a - beta) * (1 + eta_of e2 e3) - bprev ^ 2 * (1 + gamma_of e0 e1 e3) / dprev)
+      ∧ |eta_of e2 e3| ≤ 2.1 * u ∧ |gamma_of e0 e1 e3| ≤ 3.1 * u :=
+  sweep_step_backward_bound hu hu1 h0 h1 h2 h3
 
 end Certkit

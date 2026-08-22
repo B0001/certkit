@@ -35,6 +35,15 @@ non-deterministic, or adversarial. It rests on four things:
    establishes it by interval LDLᵀ plus Sylvester's law of inertia: if exactly
    one eigenvalue lies below `β`, then `β ≤ λ₂`. If any pivot interval
    straddles zero, the inertia is undetermined and the checker abstains.
+   This holds regardless of how `β` and the witness vector were obtained --
+   in particular, a solver that only searched one symmetry sector of a
+   larger operator (a Krylov method restricted to a particle-number or spin
+   block, say) may hand the checker a `β` that only separates levels
+   *within that sector*. The inertia count is taken over the whole operator
+   the certificate references, not the sector, so a sector-local `β` that
+   does not separate the true λ₁ from λ₂ simply fails the count and the
+   checker abstains -- it cannot turn into a false enclosure. See
+   `tests/test_sector_scope.py`.
 4. **Content addressing.** The certificate is sealed with a BLAKE2b digest and
    references the operator by hash. Mutating either is detected. Floats are
    stored as C99 hex literals so nothing round-trips through decimal.
@@ -318,6 +327,11 @@ milestone in itself, and the interval-arithmetic layer is the one after that.
 - `sturm_be` is tridiagonal-only, and needs exactly represented entries. A Pauli
   sum's diagonal is a sum of coefficients, so there is no single matrix the float
   recurrence would be running on; the rule refuses rather than picking one.
+- A producer that only explores one symmetry sector of a larger operator --
+  rather than the whole thing, as `certkit.producer` always does -- will
+  abstain more often, not less: its `β` verifies only when that sector
+  happens to hold the true ground state. That is a coverage cost the
+  producer pays, never a soundness gap the checker has (certkit-487).
 - The forward-enclosure routes still grow, and still abstain rather than rounding
   a pivot to a sign. They remain the only option above bandwidth 1.
 - `DENSE_LIMIT = 160` — interval LDLᵀ is cubic in pure Python, so above that the

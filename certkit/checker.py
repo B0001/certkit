@@ -245,6 +245,18 @@ def _temple(op, x, beta, claim_lo, claim_hi, rule, deps=()) -> Verdict:
     Upper bound: Rayleigh-Ritz, lambda_min <= mu for any nonzero x.
     Lower bound: Temple's inequality. The caller is responsible for having
     established the gap; this function assumes nothing on its own.
+
+    Note what "the gap" means here: lambda_2 of the *whole* operator, not of
+    whatever subspace a producer used to find x and beta. A solver that only
+    ever explored one symmetry sector may pick beta from that sector's own
+    local spectrum -- this function does not know or care. mu and rho are
+    recomputed from x against the full operator (`_rayleigh_and_residual`),
+    and both callers below discharge beta by counting the full operator's
+    eigenvalues, not the sector's. A sector-local beta that fails to separate
+    the *full* spectrum makes that count come out wrong and the caller
+    abstains before this function is even reached -- it cannot produce a
+    false enclosure by having looked at the wrong subspace. See
+    `tests/test_sector_scope.py` (certkit-487) for a constructed case.
     """
     mu, rho2 = _rayleigh_and_residual(op, x)
     denom = Iv.exact(beta) - mu
