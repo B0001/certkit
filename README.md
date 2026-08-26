@@ -69,6 +69,7 @@ vector and read rows from:
 | dense | `dense_symmetric_real` | explicit rows, exact symmetry check |
 | sparse | `sparse_csr_symmetric_real` | CSR; structure and symmetry validated |
 | matrix-free | `pauli_sum_real` | qubit Hamiltonian of dimension 2^q, never built |
+| dense, complex | `dense_hermitian_complex` | explicit `(re, im)` rows, exact Hermitian check |
 
 A Pauli string acts on a basis state as a bit flip plus a phase, so `apply`
 costs O(terms · 2^q) with no matrix anywhere. Strings are required to carry an
@@ -129,6 +130,8 @@ temple_ref           the same, with the gap discharged by a referenced certifica
 sturm                exactly `count` eigenvalues below `beta`, via banded LDL^T
 sturm_be             the same claim, via backward error with a runtime bound
 gershgorin_rayleigh  loose; needs no gap at all, and is fully matrix-free
+gen_gershgorin_rayleigh  the pencil A x = lambda S x; needs S provably PD
+hermitian_gershgorin_rayleigh  gershgorin_rayleigh's complex Hermitian analogue
 combine              a derivation node: two one-sided bounds, no arithmetic
 gershgorin           every eigenvalue is at least `bound`; witness-free
 rayleigh             lambda_min is at most `bound`, from a trial vector
@@ -154,6 +157,87 @@ At 2048 dimensions the Hamiltonian is never built; the checker only applies it
 and reads its rows, straight from the Pauli terms. Where the tight route stops
 applying it *says so* rather than degrading, and the loose route reports its
 width rather than hiding it in a confidence score.
+
+## The generalized eigenproblem
+
+Real quantum chemistry carries an overlap matrix S: the problem is
+`A x = lambda S x`, not `A x = lambda x`. `gen_gershgorin_rayleigh` extends
+`gershgorin_rayleigh` to this pencil. The claim carries a second operator
+reference, `metric_ref`, alongside the usual `operator_ref`; the rule
+abstains if S is missing, dimension-mismatched, or swapped for a different S
+after the fact — `metric_ref` is a content hash exactly like `operator_ref`,
+so tampering with it is caught the same way.
+
+The bound: for S symmetric, `T := S^{-1} A` is self-adjoint in the S-inner
+product `<u, v>_S = u^T S v`, and its eigenvalues are exactly the
+generalized eigenvalues (`Tv = lambda v` iff `A v = lambda S v`), so the
+ordinary Rayleigh-Ritz bound applies in that inner product space: for any
+nonzero witness x,
+
+    lambda_min(A, S) <= (x'Ax) / (x'Sx)
+
+For the lower bound: `(x'Ax)/(x'Sx) = a/s`, where a and s are the real
+numbers with `x'Ax = a*||x||^2` and `x'Sx = s*||x||^2` — both lie in their
+own operator's Gershgorin-enclosed spectrum, so the ratio lies in the
+interval quotient of the two Gershgorin enclosures, for *every* nonzero x,
+including the one that minimizes the generalized Rayleigh quotient. S = I
+collapses this back to `gershgorin_rayleigh` exactly, since dividing by the
+degenerate interval [1, 1] is a no-op.
+
+S's positive-definiteness is never assumed: the rule proceeds only once
+Gershgorin proves S's own spectrum is strictly positive, and abstains
+otherwise. A real positive-definite S with too little diagonal dominance for
+Gershgorin to see it (a 1D-Laplacian-like stencil, say) is a legitimate
+abstention, not a bug —
+`test_abstains_when_s_positive_definiteness_is_not_provable_by_gershgorin` in
+`tests/test_generalized.py` pins that case down, alongside an exact-oracle
+test against a diagonal pencil (`Fraction` arithmetic, zero rounding in the
+ground truth) and the usual tamper/missing-reference adversarial cases.
+
+## Complex Hermitian operators
+
+Everything above is real symmetric. A complex Hermitian operator (`A = A^H`,
+i.e. `a_ij = conj(a_ji)`) needs its own interval type — a real `Iv` pair
+can't enclose a complex number — and its own symmetry check, since "equal"
+now means "equal after conjugation" off the diagonal, and "exactly real" on
+it.
+
+`CIv` (in `interval.py`) is an axis-aligned rectangle `re + i*im`, built
+entirely from `Iv`'s already-sound real operations, so it inherits their
+soundness rather than re-deriving it. `dense_hermitian_complex` stores
+explicit `(re, im)` rows and checks Hermitian-ness exactly: every diagonal
+entry must have a zero imaginary part, and every off-diagonal pair
+`(a_ij, a_ji)` must be exact conjugates — not close, equal, the same way
+`dense_symmetric_real` demands `a_ij == a_ji` exactly rather than "close
+enough".
+
+`hermitian_gershgorin_rayleigh` is `gershgorin_rayleigh`'s complex analogue,
+matrix-free like its real counterpart:
+
+- **Upper bound**: the Hermitian Rayleigh quotient `mu(x) = Re<x|Ax>/<x|x>`,
+  with `<u|v> := sum_i conj(u_i) v_i`. Rayleigh-Ritz for self-adjoint
+  operators holds in this inner product exactly as it does in the real
+  Euclidean one — real-symmetric is the special case of Hermitian with a
+  zero imaginary part throughout. `<x|Ax>` is provably real whenever `A` is
+  Hermitian (`conj(<x|Ax>) = <Ax|x> = x^H A^H x = x^H A x = <x|Ax>`), so its
+  real part alone, `.re` of the `CIv` `cdot` returns, is the quantity in play.
+- **Lower bound**: Gershgorin, generalized by replacing the row's absolute-value
+  sum with a modulus sum (`CIv.mag_ub`). Hermitian diagonal entries and
+  eigenvalues are both exactly real, so "the smallest disc's left endpoint is
+  a sound global floor" transfers verbatim from the real case.
+
+What is **not** here: a complex analogue of `temple_inertia`/`sturm`. Those
+routes need an interval LDL^T factorisation, and pivoting through outward-rounded
+`CIv` arithmetic is a materially different, unimplemented piece of work — real
+research, not a small extension of the real banded solver — so it is out of
+scope for this slice. `dense_hermitian_complex` deliberately leaves
+`interval_rows`/`dense_rows` unset rather than half-supporting a factorisation
+route that does not exist, and `hermitian_gershgorin_rayleigh` is the only
+rule registered against it. A rule built for one arithmetic type invoked
+against the other operator kind — `hermitian_gershgorin_rayleigh` against a
+real operator, or any real rule against a complex one — abstains cleanly
+rather than crashing on the type mismatch; see the dispatch guard in
+`checker.py` and `tests/test_complex_hermitian.py`.
 
 ## Counting without a dense factorisation
 
@@ -202,12 +286,23 @@ harmonic well:
 
 ```
       n     dense (inertia)   certified bound       width      s
-    100            verified          verified    3.45e-15    0.0
-    400         n too large          verified    7.78e-15    0.1
-   1000         n too large          verified    1.79e-08    0.3
-   4000         n too large          verified    1.01e-01    0.8
-  10000         n too large          verified    1.63e+00    1.8
+    100            verified          verified    3.47e-15    0.0
+    400         n too large          verified    7.76e-15    0.0
+   1000         n too large          verified    1.64e-14    0.0
+   4000         n too large          verified    5.95e-14    0.2
+  10000         n too large          verified    1.46e-13    0.4
+ 100000         n too large          verified    1.44e-12    4.7
 ```
+
+(Widths at 1000-10000 used to be 1.79e-08, 1.01e-01, and 1.63e+00 — a
+matrix-free Lanczos ground state that had not converged, turned by Temple into
+a wide-but-sound enclosure. `certkit-8q0`: for a tridiagonal encoding, the
+producer now reaches for LAPACK's tridiagonal eigensolver
+(`scipy.linalg.eigh_tridiagonal`, O(n), no dense materialisation) instead of a
+few hundred Lanczos steps, so the residual — and the certified width — drops
+to machine precision instead of O(1). A general (non-tridiagonal) matrix-free
+operator still goes through Lanczos and can still leave a poorly converged
+vector.)
 
 `test_one_temple_certificate_three_counting_rules` is the composition bet cashed
 in: one Temple certificate, identical in every field but `gap_ref`, verified
@@ -257,6 +352,69 @@ if verdict.ok:
     lo, hi = verdict.enclosure
 ```
 
+## Writing a producer
+
+The checker never trusts a bound the producer computed — it re-derives every
+claim itself, from the witness and the operator, in outward-rounded interval
+arithmetic. That re-derivation accumulates roughly `n` ulps across a dot
+product of length `n`, so its enclosure is *strictly wider* than any
+exact-float bound an external producer computes. Ship a bound unpadded and the
+checker will refuse it as "tighter than the re-derived enclosure" — that is
+correct behavior on the checker's part, not a soundness failure, but it is the
+first thing any new producer trips over.
+
+`certkit.producer.pad_claim(value, rel, n, spread)` is the convention every
+`certify_*` function in this repo uses to stay ahead of that widening:
+
+```python
+from certkit.producer import pad_claim
+
+pad = pad_claim(mu, slack, n, mu - lower)
+lo, hi = lower - pad, mu + pad
+```
+
+It combines a fixed relative slack (`rel`) with a term that scales with
+problem size (`n`) and with how far the estimate already sits from the bound
+being padded (`spread`). Over-padding only ever costs coverage — it can never
+make a false claim look verified — so when in doubt, round the pad up.
+External producers emitting certificates for this checker should pad their
+own claims the same way, either by calling `pad_claim` directly or by
+reproducing its formula.
+
+### Never transcribe a bound onto a different vector
+
+The witness format is real-only. A producer whose own solver works with
+complex vectors — a real-time Krylov solver on a real symmetric Hamiltonian,
+say — has to reduce a complex estimate `psi0` to a real witness before it can
+emit a certificate at all. `H` real symmetric means its ground state can be
+chosen real, and both `Re(psi0)` and `Im(psi0)` are individually valid real
+vectors to try — but they are *different* vectors from `psi0` and from each
+other, each with its own Rayleigh quotient. Computing mu, the residual, and
+the resulting bound from `psi0` and then shipping a certificate whose witness
+field carries `Re(psi0)` submits a bracket that is a true statement about a
+vector the certificate doesn't actually carry. The checker recomputes mu and
+the residual from whatever vector is in the witness field — never from
+anything the producer claims about a different one — so the mismatched claim
+is refused, correctly, as "claimed interval is tighter than the re-derived
+enclosure" (never a false VERIFIED; see `tests/test_complex_witness_transcription.py`,
+certkit-bz5). The fix is to recompute the bracket on the exact vector being
+shipped, not the one it was derived from:
+
+```python
+from certkit.producer import certify_lambda_min_from_witness
+
+cert, op = certify_lambda_min_from_witness(operator, psi0.real)
+```
+
+`certify_lambda_min_from_witness` takes an externally-supplied witness vector
+and derives mu, the residual, and the lower bound from it directly — the same
+computation `certify_lambda_min` runs on the vector it finds internally, just
+parameterised over a caller-supplied one instead. There is no code path
+through it by which a number computed against a different vector could enter
+the certificate. A producer with its own witness (in this repo or outside it)
+should call this instead of hand-assembling a certificate around numbers
+computed elsewhere.
+
 ## What the coverage sweep shows
 
 `python examples/coverage_sweep.py`, n = 12, 40 matrices per gap:
@@ -285,7 +443,7 @@ certkit/operators.py  dense / sparse / matrix-free backends TRUSTED
 certkit/banded.py     banded LDL^T / Sturm counting          TRUSTED
 certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
-certkit/producer.py   numpy + Lanczos, emits witnesses      untrusted
+certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
 lean/Certkit/         soundness obligations in Lean 4       statements only
 tests/                106 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
@@ -320,10 +478,21 @@ milestone in itself, and the interval-arithmetic layer is the one after that.
 
 ## Known limits
 
-- **Counting is no longer the binding constraint; the producer's eigenvector is.**
-  Past n ≈ 10⁴ a Lanczos vector that has not converged yields a large residual,
-  and Temple turns that into a wide enclosure — a useless answer rather than a
-  wrong one. Better eigensolvers are pure coverage work on the untrusted side.
+- **The producer's eigenvector was the binding constraint past n ≈ 10⁴ for
+  tridiagonal operators; it no longer is, up to at least n = 10⁵.** A Lanczos
+  vector that had not converged used to yield a large residual, and Temple
+  turned that into a wide-but-sound enclosure. For an operator the producer
+  recognises as tridiagonal (as `schrodinger_1d` is), `_ground_state` now
+  calls `scipy.linalg.eigh_tridiagonal` — LAPACK's MRRR algorithm, O(n), no
+  dense materialisation — instead of a few hundred matrix-free Lanczos steps,
+  and the certified width on the Schrödinger fixture drops from 1.63 at
+  n = 10⁴ to 1.46e-13, and reaches 1.44e-12 at n = 10⁵ (`certkit-8q0`,
+  `test_ground_state_eigenvector_is_no_longer_the_binding_constraint`). This
+  is scoped to operators the producer can recognise as tridiagonal from their
+  own encoding: a general matrix-free operator (a wide-band CSR, a Pauli sum
+  too large to materialise) still goes through matrix-free Lanczos and can
+  still leave a poorly converged vector — that remains coverage work, not
+  fixed by this change.
 - `sturm_be` is tridiagonal-only, and needs exactly represented entries. A Pauli
   sum's diagonal is a sum of coefficients, so there is no single matrix the float
   recurrence would be running on; the rule refuses rather than picking one.
@@ -355,7 +524,10 @@ milestone in itself, and the interval-arithmetic layer is the one after that.
 
 ## Not done yet
 
-- Complex Hermitian operators.
+- A tight (Temple/inertia) route for complex Hermitian operators — only the
+  matrix-free Gershgorin + Rayleigh route exists (`hermitian_gershgorin_rayleigh`);
+  see "Complex Hermitian operators" above. It needs an interval LDL^T over `CIv`,
+  which is unimplemented.
 - A banded (b > 1) version of the backward-error analysis.
 - Proofs on the Lean side.
 - A count rule that works matrix-free, which is what would let a large Pauli

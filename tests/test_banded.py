@@ -109,15 +109,23 @@ def test_bandwidth_limit_is_enforced():
 
 # -- reach ----------------------------------------------------------------
 def test_banded_route_verifies_far_beyond_the_dense_ceiling():
+    """The certified enclosure at this size is now tight enough (~1e-14) that
+    it can sit inside LAPACK dense `eigvalsh`'s own few-ulp error -- exactly
+    the situation `test_the_certified_interval_can_be_narrower_than_lapack_
+    error` documents at n=120, below. The exact rational Sturm oracle is the
+    only valid ground truth once the certified width gets this small; see
+    `exact_lambda_min`.
+    """
+    from fractions import Fraction
+
     n = 1000
     enc = schrodinger_1d(n)
     root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)))
     assert root.ok and root.rule == "temple_ref"
 
-    diag = [decode_operator(enc).row(i)[i].lo for i in range(n)]
-    m = np.diag(diag) + np.diag([-1.0] * (n - 1), 1) + np.diag([-1.0] * (n - 1), -1)
-    truth = float(np.linalg.eigvalsh(m)[0])
-    assert root.rederived[0] <= truth <= root.rederived[1]
+    lo, hi = exact_lambda_min(enc)
+    c_lo, c_hi = root.rederived
+    assert Fraction(c_lo) <= lo and hi <= Fraction(c_hi)
 
 
 def test_dense_route_declines_the_same_problem():

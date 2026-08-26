@@ -177,3 +177,102 @@ def sqnorm(u: Sequence[Iv]) -> Iv:
     for a in u:
         acc = acc + a * a
     return acc.meet_nonneg()
+
+
+# -- complex interval arithmetic -----------------------------------------
+@dataclass(frozen=True)
+class CIv:
+    """A closed axis-aligned rectangle in the complex plane: `re + i*im` for
+    `re` in the interval `re`, `im` in the interval `im`.
+
+    Every operation returns a rectangle that provably contains the exact
+    complex result for every pair of complex numbers drawn from the input
+    rectangles -- built entirely from `Iv`'s already-proven-sound real
+    arithmetic, so no new rounding argument is needed: each real sub-op
+    (a product, a sum) is itself an `Iv` operation and inherits its
+    soundness.
+    """
+
+    re: Iv
+    im: Iv
+
+    @staticmethod
+    def exact(z: complex) -> "CIv":
+        """The degenerate rectangle {z}. A complex double pair *is* exact."""
+        return CIv(Iv.exact(z.real), Iv.exact(z.imag))
+
+    def conj(self) -> "CIv":
+        return CIv(self.re, -self.im)
+
+    def __add__(self, o: "CIv") -> "CIv":
+        return CIv(self.re + o.re, self.im + o.im)
+
+    def __sub__(self, o: "CIv") -> "CIv":
+        return CIv(self.re - o.re, self.im - o.im)
+
+    def __neg__(self) -> "CIv":
+        return CIv(-self.re, -self.im)
+
+    def __mul__(self, o: "CIv") -> "CIv":
+        # (a+bi)(c+di) = (ac-bd) + (ad+bc)i, each term an already-sound Iv op.
+        return CIv(self.re * o.re - self.im * o.im, self.re * o.im + self.im * o.re)
+
+    def __truediv__(self, o: Iv) -> "CIv":
+        """Division by a *real* interval only (all this checker ever needs:
+        normalising by a positive squared-norm). General complex/complex
+        interval division is not implemented -- it is unused here, and a
+        sound version is materially trickier to get right than this module
+        should carry untested.
+        """
+        return CIv(self.re / o, self.im / o)
+
+    @property
+    def mag_ub(self) -> float:
+        """A sound upper bound on |z| for every z in the rectangle.
+
+        max(|re.lo|, |re.hi|) and max(|im.lo|, |im.hi|) each bound the real
+        and imaginary magnitude; sqrt(re_mag^2 + im_mag^2), computed with
+        outward-rounded `Iv` arithmetic and taking the upper endpoint, bounds
+        the modulus of every point in the rectangle (the true corner-point
+        modulus can only be smaller, since re_mag/im_mag already dominate
+        every point's coordinates).
+        """
+        re_m = self.re.mag_ub
+        im_m = self.im.mag_ub
+        sq = Iv.exact(re_m) * Iv.exact(re_m) + Iv.exact(im_m) * Iv.exact(im_m)
+        return sq.sqrt().hi
+
+    def __repr__(self) -> str:  # pragma: no cover - display only
+        return f"({self.re!r} + i*{self.im!r})"
+
+
+CZERO = CIv(ZERO, ZERO)
+
+
+def cdot(u: Sequence[CIv], v: Sequence[CIv]) -> CIv:
+    """The Hermitian inner product sum_i conj(u_i) * v_i.
+
+    Conjugate-linear in the first argument, matching the physics convention
+    <u|v>. `cdot(x, x)` is therefore an enclosure of a real, non-negative
+    number (a sum of |x_i|^2 terms) even though it is returned as a `CIv` --
+    callers that need that fact as an `Iv` should use `csqnorm` instead, which
+    proves it directly rather than relying on the imaginary part rounding to
+    contain zero.
+    """
+    if len(u) != len(v):
+        raise IntervalError("dimension mismatch in cdot")
+    acc = CZERO
+    for a, b in zip(u, v):
+        acc = acc + a.conj() * b
+    return acc
+
+
+def csqnorm(u: Sequence[CIv]) -> Iv:
+    """Enclosure of sum |u_i|^2 = sum (re_i^2 + im_i^2); non-negative by
+    construction, and real by construction (no complex multiplication or
+    conjugate-symmetry argument needed, unlike `cdot`).
+    """
+    acc = ZERO
+    for a in u:
+        acc = acc + a.re * a.re + a.im * a.im
+    return acc.meet_nonneg()

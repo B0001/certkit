@@ -76,7 +76,7 @@ def main() -> None:
     print(head)
     print("-" * len(head))
 
-    for n in (100, 400, 1000, 4000, 10000):
+    for n in (100, 400, 1000, 4000, 10000, 100000):
         enc = schrodinger_1d(n)
 
         dense = check(*certify_lambda_min(enc))
@@ -112,10 +112,15 @@ def main() -> None:
 
     print(
         "\nThe dense route stops at n = 160 because an O(n^3) interval factorisation\n"
-        "in pure Python is not a route. Counting is no longer the binding\n"
-        "constraint anywhere below n = 100000; the producer's eigenvector is, and\n"
-        "a poorly converged vector shows up as a wide interval rather than a wrong\n"
-        "one.\n"
+        "in pure Python is not a route. On this tridiagonal fixture, the producer's\n"
+        "ground state now comes from LAPACK's tridiagonal eigensolver rather than a\n"
+        "few hundred steps of matrix-free Lanczos (certkit-8q0), so the certified\n"
+        "width stays at machine precision out to n = 100000 instead of blowing up\n"
+        "past n ~ 1e4 -- counting was already not the binding constraint here, and\n"
+        "now neither is the eigenvector, for operators the producer can recognise\n"
+        "as tridiagonal. A general (non-tridiagonal) matrix-free operator still\n"
+        "goes through Lanczos and can still leave a poorly converged vector, which\n"
+        "still shows up as a wide interval rather than a wrong one.\n"
     )
 
     # Who is actually right at n = 400?

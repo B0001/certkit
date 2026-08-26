@@ -18,8 +18,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .interval import Iv
-from .operators import decode_operator, encode_dense, operator_ref
+from .interval import CZERO, Iv
+from .operators import decode_operator, encode_dense, encode_dense_hermitian, operator_ref
 from .schema import SCHEMA_VERSION, f2h, seal
 
 def _as_encoding(operator: Any) -> dict:
@@ -27,6 +27,14 @@ def _as_encoding(operator: Any) -> dict:
     if isinstance(operator, dict):
         return operator
     return encode_dense([[float(v) for v in row] for row in operator])
+
+
+def _as_encoding_hermitian(operator: Any) -> dict:
+    """Accept either a `dense_hermitian_complex` encoding or a plain
+    list-of-lists / ndarray of complex numbers."""
+    if isinstance(operator, dict):
+        return operator
+    return encode_dense_hermitian([[complex(v) for v in row] for row in operator])
 
 
 # -- float-side operator application (untrusted, fast) --------------------
@@ -115,6 +123,37 @@ def _lanczos_ground_state(apply, n: int, k: int = 120, seed: int = 0, start=None
     return x / np.linalg.norm(x), float(vals[0]), theta2
 
 
+def _tridiagonal_ground_state(diag, off, n: int):
+    """The two lowest eigenpairs of a real symmetric tridiagonal matrix, via
+    LAPACK's MRRR algorithm (scipy.linalg.eigh_tridiagonal), when scipy is
+    importable.
+
+    This is the shift-and-invert style fix the coverage-cliff finding asked
+    for, specialised to the case the producer can actually reach for cheaply:
+    when the operator's own encoding is tridiagonal (as schrodinger_1d's is),
+    LAPACK computes the extreme eigenpairs directly in O(n) without ever
+    forming a dense matrix, to machine precision -- not the O(1)-scale
+    residual a few hundred steps of matrix-free Lanczos leaves on an operator
+    whose ground state is delocalised over most of n. Returns None (never
+    raises) if scipy is unavailable or n == 0, so the caller falls back to
+    the matrix-free Lanczos route -- a producer-side solver choice, so a
+    fallback only ever costs coverage, never soundness.
+    """
+    if n == 0:
+        return None
+    try:
+        from scipy.linalg import eigh_tridiagonal
+    except ImportError:
+        return None
+    d = np.asarray(diag, dtype=float)
+    e = np.asarray(off[: n - 1], dtype=float) if n > 1 else np.zeros(0)
+    hi = min(1, n - 1)
+    w, v = eigh_tridiagonal(d, e, select="i", select_range=(0, hi))
+    lam1 = float(w[0])
+    lam2 = float(w[1]) if len(w) > 1 else float(w[0] + 1.0)
+    return v[:, 0], lam1, lam2
+
+
 def _ground_state(enc: dict):
     """Best available eigenvector estimate, plus a guess at lambda_2."""
     apply, n = _float_apply(enc)
@@ -124,6 +163,14 @@ def _ground_state(enc: dict):
         w, v = np.linalg.eigh(np.array(rows))
         lam2 = float(w[1]) if n > 1 else float(w[0] + 1.0)
         return v[:, 0], float(w[0]), lam2, apply
+
+    tri = _tridiagonal_arrays(enc)
+    if tri is not None:
+        result = _tridiagonal_ground_state(tri[0], tri[1], n)
+        if result is not None:
+            x, lam1, lam2 = result
+            return x, lam1, lam2, apply
+
     # A random start has almost no overlap with a localised ground state, so
     # bias it toward the smallest diagonal entry and then restart from the Ritz
     # vector. Untrusted heuristics, both of them: a poor estimate here costs
@@ -249,31 +296,44 @@ def _choose_beta(enc: dict, lam1: float, lam2: float) -> float:
 U = 2.0**-53
 
 
-def _pad(value: float, rel: float = 1e-9, n: int = 1, spread: float = 0.0) -> float:
-    """How far the producer widens its claim before shipping it.
+def pad_claim(value: float, rel: float = 1e-9, n: int = 1, spread: float = 0.0) -> float:
+    """How far a producer must widen a claim before shipping it to `check()`.
 
-    The checker's interval arithmetic accumulates roughly n ulps across a dot
-    product of length n, so a claim padded by a fixed relative slack starts
-    getting refused at large n -- correctly, since it really is tighter than
-    what the checker can re-derive. Padding with an n-dependent term keeps
-    coverage without touching soundness: over-padding only ever makes the
-    claim weaker.
+    The checker re-derives every bound itself, in outward-rounded interval
+    arithmetic, from the witness and the operator -- never from anything the
+    producer computed. That re-derivation accumulates roughly n ulps across a
+    dot product of length n, so its enclosure is *strictly wider* than any
+    exact-float bound a producer computes. An unpadded transcription of a
+    correct bound is therefore always refused as "tighter than the re-derived
+    enclosure" -- this is a calibration requirement, not a soundness bug.
+
+    `value` is the point estimate being padded around (typically the Rayleigh
+    quotient mu), `rel` is a relative slack, `n` is the problem size driving
+    the ulp accumulation above, and `spread` is any extra distance already
+    known between the estimate and the bound being widened (e.g. mu - lower)
+    that should also scale the pad. Returns a pad added on the wide side and
+    subtracted on the tight side; over-padding only ever costs coverage, never
+    soundness, so producers should round this up rather than down.
+
+    Every `certify_*` function in this module uses this convention. External
+    producers are expected to pad their own claims the same way -- see the
+    README's "Writing a producer" section.
     """
     scale = max(1.0, abs(value)) + abs(spread)
     return rel * scale + 16.0 * U * n * scale + 1e-300
 
 
 # -- certificate producers ------------------------------------------------
-def certify_lambda_min(operator: Any, *, slack: float = 1e-9) -> tuple[dict, dict]:
-    """Temple + inertia: the tight route. Needs a gap and an O(n^3) route."""
-    enc = _as_encoding(operator)
-    x, lam1, lam2, apply = _ground_state(enc)
+def _temple_inertia_bracket(apply, x, beta: float, slack: float):
+    """mu, lower bound, and pad for a Temple+inertia certificate around `x`.
 
-    # Gap parameter: anywhere strictly between lambda_1 and lambda_2. The
-    # checker discharges it by inertia count, so a bad guess costs coverage,
-    # never soundness.
-    beta = 0.5 * (lam1 + lam2)
-
+    Every quantity here is computed from `x`, `apply`, and `beta` alone -- none
+    of it is inherited from wherever `x` originally came from. This is what
+    makes it safe to share between `certify_lambda_min` (which finds its own
+    witness) and `certify_lambda_min_from_witness` (which takes one from the
+    caller): there is no code path by which a bound computed against a
+    *different* vector could leak into the result.
+    """
     ax = apply(x)
     nx2 = float(x @ x)
     mu = float(x @ ax) / nx2
@@ -289,8 +349,63 @@ def certify_lambda_min(operator: Any, *, slack: float = 1e-9) -> tuple[dict, dic
         # decides, and the inertia discharge will refuse this.
         lower = mu - 1.0 - abs(mu)
 
-    pad = _pad(mu, slack, len(x), mu - lower)
+    pad = pad_claim(mu, slack, len(x), mu - lower)
+    return mu, lower, pad
+
+
+def certify_lambda_min(operator: Any, *, slack: float = 1e-9) -> tuple[dict, dict]:
+    """Temple + inertia: the tight route. Needs a gap and an O(n^3) route."""
+    enc = _as_encoding(operator)
+    x, lam1, lam2, apply = _ground_state(enc)
+
+    # Gap parameter: anywhere strictly between lambda_1 and lambda_2. The
+    # checker discharges it by inertia count, so a bad guess costs coverage,
+    # never soundness.
+    beta = 0.5 * (lam1 + lam2)
+
+    mu, lower, pad = _temple_inertia_bracket(apply, x, beta, slack)
     return _emit(enc, "lambda_min_enclosure", "temple_inertia", x,
+                 lower - pad, mu + pad, beta=beta)
+
+
+def certify_lambda_min_from_witness(operator: Any, x: Sequence[float], *,
+                                     slack: float = 1e-9) -> tuple[dict, dict]:
+    """Temple + inertia around a witness vector the *caller* supplies.
+
+    `certify_lambda_min` always finds its own trial vector via `_ground_state`.
+    That is unusable for a producer whose vector comes from somewhere else
+    entirely -- e.g. an external real-time Krylov solver whose ground-state
+    estimate is complex, where only the real (or imaginary) part is a valid
+    real witness (certkit-bz5). mu, the residual, and the resulting lower
+    bound are all recomputed here from `x` and `operator` alone, via the same
+    `_temple_inertia_bracket` helper `certify_lambda_min` uses -- never
+    accepted from the caller. That makes it structurally impossible to ship a
+    certificate whose numbers were computed against a different vector (e.g.
+    a complex trial state) than the one actually placed in the witness field:
+    the bug this function exists to make unrepresentable.
+
+    Callers are responsible for `x` being a real vector of the operator's
+    dimension; everything else -- including whether `x` is any good as a
+    witness -- costs coverage, not soundness, exactly as with
+    `certify_lambda_min`.
+    """
+    enc = _as_encoding(operator)
+    apply, n = _float_apply(enc)
+    xv = np.asarray(x, dtype=float)
+    if xv.shape != (n,):
+        raise ValueError(f"witness has shape {xv.shape}, operator has dimension {n}")
+    if not float(xv @ xv) > 0:
+        raise ValueError("witness vector must be nonzero")
+
+    # An independent estimate of lambda_2 for the gap parameter: a full
+    # solve of the operator itself, unrelated to the caller's x. A bad
+    # estimate only costs coverage -- the checker discharges beta by an
+    # inertia count against the true operator, not by trusting this.
+    _, lam1, lam2, _ = _ground_state(enc)
+    beta = 0.5 * (lam1 + lam2)
+
+    mu, lower, pad = _temple_inertia_bracket(apply, xv, beta, slack)
+    return _emit(enc, "lambda_min_enclosure", "temple_inertia", xv,
                  lower - pad, mu + pad, beta=beta)
 
 
@@ -315,9 +430,148 @@ def certify_lambda_min_matrixfree(operator: Any, *, slack: float = 1e-9) -> tupl
         radius = sum(v.mag_ub for j, v in entries.items() if j != i)
         lower = min(lower, diag - radius)
 
-    pad = _pad(mu, slack, len(x), mu - lower)
+    pad = pad_claim(mu, slack, len(x), mu - lower)
     return _emit(enc, "lambda_min_enclosure", "gershgorin_rayleigh", x,
                  lower - pad, mu + pad)
+
+
+def certify_lambda_min_hermitian(operator: Any, *, slack: float = 1e-9) -> tuple[dict, dict]:
+    """Gershgorin + Hermitian Rayleigh: the matrix-free route for complex
+    Hermitian operators, checked by `hermitian_gershgorin_rayleigh`.
+
+    This is the only route complex Hermitian operators have today -- there is
+    no complex analogue of the interval-LDL^T inertia count yet (it would
+    need outward-rounded `CIv` pivoting, which is unimplemented and out of
+    scope for certkit-3ta; see the README's Complex Hermitian operators
+    section). A bad trial vector, exactly as in `certify_lambda_min_
+    matrixfree`, only ever costs coverage: the checker recomputes mu and the
+    Gershgorin floor from the operator and witness alone.
+    """
+    enc = _as_encoding_hermitian(operator)
+    n = enc["n"]
+    a = np.array(
+        [
+            [complex(float.fromhex(e["re"]), float.fromhex(e["im"])) for e in row]
+            for row in enc["rows"]
+        ]
+    )
+    _, vecs = np.linalg.eigh(a)  # LAPACK's Hermitian eigensolver, complex-aware
+    x = vecs[:, 0]
+
+    ax = a @ x
+    nx2 = float(np.vdot(x, x).real)
+    mu = float(np.vdot(x, ax).real) / nx2
+
+    op = decode_operator(enc)
+    lower = float("inf")
+    for i in range(op.n):
+        entries = op.row(i)
+        diag = entries.get(i, CZERO).re.lo
+        radius = sum(v.mag_ub for j, v in entries.items() if j != i)
+        lower = min(lower, diag - radius)
+
+    pad = pad_claim(mu, slack, n, mu - lower)
+    witness = {
+        "rule": "hermitian_gershgorin_rayleigh",
+        "vector": [
+            {"re": f2h(float(z.real)), "im": f2h(float(z.imag))} for z in x
+        ],
+    }
+    claim = {
+        "kind": "lambda_min_enclosure",
+        "enclosure": {"lo": f2h(lower - pad), "hi": f2h(mu + pad)},
+    }
+    return _cert(enc, claim, witness), enc
+
+
+def certify_lambda_min_generalized(A: Any, S: Any, *, slack: float = 1e-9) -> tuple[dict, dict, dict]:
+    """The generalized eigenproblem A x = lambda S x: the matrix-free floor
+    and ceiling, checked by `gen_gershgorin_rayleigh`.
+
+    A trial vector is found by reducing to a standard problem via a Cholesky
+    factorisation of S (numpy, untrusted -- purely to get a good witness; the
+    checker never sees this reduction and redoes everything from A, S, and the
+    vector alone). Needs both A and S dense-materialisable; the checker's rule
+    itself has no such limit, since it only ever calls `apply` and `row`.
+
+    Returns (certificate, A_encoding, S_encoding).
+    """
+    a_enc = _as_encoding(A)
+    s_enc = _as_encoding(S)
+    a_op = decode_operator(a_enc)
+    s_op = decode_operator(s_enc)
+    if a_op.n != s_op.n:
+        raise ValueError("A and S must have the same dimension")
+
+    a_rows, s_rows = a_op.dense_rows(), s_op.dense_rows()
+    if a_rows is None or s_rows is None:
+        raise ValueError("certify_lambda_min_generalized needs dense-materialisable A and S")
+
+    a = np.array(a_rows)
+    s = np.array(s_rows)
+    try:
+        linv = np.linalg.inv(np.linalg.cholesky(s))
+        b = linv @ a @ linv.T
+        b = 0.5 * (b + b.T)
+        _, vecs = np.linalg.eigh(b)
+        x = linv.T @ vecs[:, 0]
+        x = x / np.linalg.norm(x)
+    except np.linalg.LinAlgError:
+        # S did not even look positive definite to a float Cholesky. Emit
+        # anyway with an arbitrary trial vector -- a bad witness costs
+        # coverage, and the checker's own PD check will abstain regardless.
+        x = np.eye(a_op.n)[0]
+
+    sxx = float(x @ (s @ x))
+    if sxx > 0:
+        mu = float(x @ (a @ x)) / sxx
+    else:
+        # Same story: not this function's job to decide S is unusable.
+        mu = float(x @ (a @ x))
+
+    a_lower = a_upper = None
+    s_lower = s_upper = None
+    for op, lo_name in ((a_op, "a"), (s_op, "s")):
+        lower, upper = float("inf"), float("-inf")
+        for i in range(op.n):
+            entries = op.row(i)
+            diag = entries.get(i, Iv.exact(0.0))
+            radius = sum(v.mag_ub for j, v in entries.items() if j != i)
+            lower = min(lower, diag.lo - radius)
+            upper = max(upper, diag.hi + radius)
+        if lo_name == "a":
+            a_lower, a_upper = lower, upper
+        else:
+            s_lower, s_upper = lower, upper
+
+    if s_lower > 0:
+        corners = (a_lower / s_lower, a_lower / s_upper, a_upper / s_lower, a_upper / s_upper)
+        floor = min(corners)
+    else:
+        # Cannot show S is positive definite from Gershgorin discs, so the
+        # checker's rule will abstain before ever looking at this bound --
+        # emit something rather than gatekeep; the checker is the component
+        # that decides.
+        floor = mu - 1.0 - abs(mu)
+
+    pad = pad_claim(mu, slack, a_op.n, mu - floor)
+    lo_bound, hi_bound = floor - pad, mu + pad
+
+    cert = seal({
+        "schema": SCHEMA_VERSION,
+        "claim": {
+            "operator_ref": operator_ref(a_enc),
+            "metric_ref": operator_ref(s_enc),
+            "kind": "lambda_min_enclosure",
+            "enclosure": {"lo": f2h(lo_bound), "hi": f2h(hi_bound)},
+        },
+        "witness": {
+            "rule": "gen_gershgorin_rayleigh",
+            "vector": [f2h(float(v)) for v in x],
+        },
+        "producer": {"name": "certkit.producer", "backend": "numpy"},
+    })
+    return cert, a_enc, s_enc
 
 
 def certify_spectrum_point(operator: Any, index: int = 0, *, slack: float = 1e-9):
@@ -336,7 +590,7 @@ def certify_spectrum_point(operator: Any, index: int = 0, *, slack: float = 1e-9
     mu = float(x @ ax) / nx2
     rho = float(np.sqrt(max((ax - mu * x) @ (ax - mu * x), 0.0) / nx2))
 
-    pad = _pad(mu, slack)
+    pad = pad_claim(mu, slack)
     return _emit(enc, "spectrum_contains", "residual", x, mu - rho - pad, mu + rho + pad)
 
 
@@ -393,7 +647,7 @@ def certify_lambda_min_composed(operator: Any, *, slack: float = 1e-9):
     gap = beta - mu
     lower = mu - rho2 / gap if gap > 0 and np.isfinite(rho2 / gap) else mu - 1.0 - abs(mu)
 
-    pad = _pad(mu, slack, len(x), mu - lower)
+    pad = pad_claim(mu, slack, len(x), mu - lower)
     temple = _cert(
         enc,
         {
@@ -430,7 +684,7 @@ def certify_bounds_composed(operator: Any, *, slack: float = 1e-9):
 
     ax = apply(x)
     mu = float(x @ ax) / float(x @ x)
-    pad = _pad(mu, slack, op.n, mu - lower)
+    pad = pad_claim(mu, slack, op.n, mu - lower)
     lo_bound, hi_bound = lower - pad, mu + pad
 
     floor = _cert(enc, {"kind": "spectrum_lower_bound", "bound": f2h(lo_bound)},
@@ -493,7 +747,7 @@ def certify_lambda_min_banded(operator: Any, *, slack: float = 1e-9):
     gap = beta - mu
     lower = mu - rho2 / gap if gap > 0 and np.isfinite(rho2 / gap) else mu - 1.0 - abs(mu)
 
-    pad = _pad(mu, slack, len(x), mu - lower)
+    pad = pad_claim(mu, slack, len(x), mu - lower)
     temple = _cert(
         enc,
         {"kind": "lambda_min_enclosure",
@@ -552,7 +806,7 @@ def certify_lambda_min_backward(operator: Any, *, slack: float = 1e-9):
     gap = beta - mu
     lower = mu - rho2 / gap if gap > 0 and np.isfinite(rho2 / gap) else mu - 1.0 - abs(mu)
 
-    pad = _pad(mu, slack, len(x), mu - lower)
+    pad = pad_claim(mu, slack, len(x), mu - lower)
     temple = _cert(
         enc,
         {"kind": "lambda_min_enclosure",

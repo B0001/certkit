@@ -6,15 +6,18 @@ interface, and it is exactly what a Krylov method needs, so the same
 certificate machinery covers a 6x6 test matrix and a matrix-free qubit
 Hamiltonian of dimension 2^q.
 
-Three backends:
+Four backends:
 
     dense_symmetric_real       explicit rows
     sparse_csr_symmetric_real  CSR, symmetry checked exactly
     pauli_sum_real             matrix-free; never materialised
+    dense_hermitian_complex    complex Hermitian rows, over `CIv` not `Iv`
 
 Each backend must supply:
 
-    apply(x)          interval matvec
+    apply(x)          interval matvec (`Iv` in/out, except the complex
+                       backend, which is `CIv` in/out -- see its own rules
+                       in checker.py, which are the only ones that call it)
     row(i)            column -> interval, for Gershgorin
     interval_rows()   enclosed rows for O(n^3) routes, or None if refused
     dense_rows()      float rows, for the untrusted producer only
@@ -37,7 +40,7 @@ from __future__ import annotations
 
 from typing import Any, Iterator, Sequence
 
-from .interval import Iv, IntervalError
+from .interval import CIv, CZERO, Iv, IntervalError
 from .schema import SchemaError, digest, f2h, h2f, require
 
 # Refuse to materialise anything larger than this for O(n^3) routes. Interval
@@ -250,6 +253,58 @@ class PauliSumReal(Operator):
                 )
 
 
+# -- dense complex Hermitian ------------------------------------------------
+class DenseHermitianComplex(Operator):
+    """A complex Hermitian operator, stored as explicit `(re, im)` rows.
+
+    Only the matrix-free route is available for this kind today:
+    `interval_rows`/`dense_rows` are deliberately left at the base class's
+    `None` rather than half-supporting a route (interval LDL^T inertia
+    counting) that has no complex analogue implemented yet -- see
+    checker.py's `hermitian_gershgorin_rayleigh` and the README's Complex
+    Hermitian operators section.
+    """
+
+    kind = "dense_hermitian_complex"
+
+    def __init__(self, rows: list[list[tuple[float, float]]]):
+        self.rows = rows
+        self.n = len(rows)
+        self._civ = [[CIv(Iv.exact(re), Iv.exact(im)) for re, im in row] for row in rows]
+
+    def apply(self, x: Sequence[CIv]) -> list[CIv]:
+        if len(x) != self.n:
+            raise IntervalError("dimension mismatch")
+        out = []
+        for r in self._civ:
+            acc = CZERO
+            for a, b in zip(r, x):
+                acc = acc + a * b
+            out.append(acc)
+        return out
+
+    def row(self, i: int) -> dict[int, CIv]:
+        return {j: self._civ[i][j] for j in range(self.n)}
+
+    def check_symmetric(self) -> None:
+        """Raise SchemaError unless the operator is exactly Hermitian.
+
+        Diagonal entries must be exactly real (Hermitian: a_ii = conj(a_ii)),
+        and off-diagonal entries must be exact conjugate pairs (a_ij =
+        conj(a_ji)) -- bit-for-bit, the same "exact, not approximate"
+        standard `DenseSymmetric.check_symmetric` holds real operators to.
+        """
+        for i in range(self.n):
+            re_ii, im_ii = self.rows[i][i]
+            if im_ii != 0.0:
+                raise SchemaError(f"Hermitian operator has a non-real diagonal entry at {i}")
+            for j in range(i):
+                re_ij, im_ij = self.rows[i][j]
+                re_ji, im_ji = self.rows[j][i]
+                if re_ij != re_ji or im_ij != -im_ji:
+                    raise SchemaError(f"operator is not exactly Hermitian at ({i}, {j})")
+
+
 # -- encode / decode ------------------------------------------------------
 def encode_dense(rows: Sequence[Sequence[float]]) -> dict:
     n = len(rows)
@@ -269,6 +324,20 @@ def encode_csr(n: int, indptr, indices, data) -> dict:
         "indptr": [int(v) for v in indptr],
         "indices": [int(v) for v in indices],
         "data": [f2h(float(v)) for v in data],
+    }
+
+
+def encode_dense_hermitian(rows: Sequence[Sequence[complex]]) -> dict:
+    n = len(rows)
+    if n == 0 or any(len(r) != n for r in rows):
+        raise SchemaError("operator must be a non-empty square matrix")
+    return {
+        "kind": "dense_hermitian_complex",
+        "n": n,
+        "rows": [
+            [{"re": f2h(complex(v).real), "im": f2h(complex(v).imag)} for v in row]
+            for row in rows
+        ],
     }
 
 
@@ -315,10 +384,26 @@ def _decode_pauli(obj: Any) -> PauliSumReal:
     return PauliSumReal(q, out)
 
 
+def _decode_dense_hermitian(obj: Any) -> DenseHermitianComplex:
+    n, rows = obj.get("n"), obj.get("rows")
+    require(isinstance(n, int) and isinstance(rows, list) and len(rows) == n,
+            "operator shape mismatch")
+    out = []
+    for r in rows:
+        require(isinstance(r, list) and len(r) == n, "operator shape mismatch")
+        row = []
+        for entry in r:
+            require(isinstance(entry, dict), "malformed complex operator entry")
+            row.append((h2f(entry.get("re")), h2f(entry.get("im"))))
+        out.append(row)
+    return DenseHermitianComplex(out)
+
+
 _DECODERS = {
     "dense_symmetric_real": _decode_dense,
     "sparse_csr_symmetric_real": _decode_csr,
     "pauli_sum_real": _decode_pauli,
+    "dense_hermitian_complex": _decode_dense_hermitian,
 }
 
 

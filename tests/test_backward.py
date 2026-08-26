@@ -192,6 +192,25 @@ def test_certified_pipeline_reaches_large_operators():
     assert root.ok and root.rule == "temple_ref"
 
 
+def test_ground_state_eigenvector_is_no_longer_the_binding_constraint():
+    """certkit-8q0: past n ~ 10^4, matrix-free Lanczos left the ground-state
+    vector unconverged and Temple turned that residual into a wide-but-sound
+    enclosure (width 1.6 at n=1e4, measured before this test existed). For a
+    tridiagonal encoding, `_ground_state` now reaches for LAPACK's MRRR
+    tridiagonal eigensolver (`scipy.linalg.eigh_tridiagonal`, O(n), no dense
+    materialisation) instead of a few hundred Lanczos steps, so the residual
+    -- and hence the certified width -- drops to machine precision instead of
+    O(1). This is a producer-side solver-quality change; nothing in checker.py
+    or the trust boundary moved, and `check_bundle` still re-derives this
+    enclosure from scratch.
+    """
+    enc = schrodinger_1d(100_000)
+    root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)))
+    assert root.ok and root.rule == "temple_ref"
+    lo, hi = root.rederived
+    assert float(hi) - float(lo) < 1e-9
+
+
 def test_enclosure_contains_the_exact_eigenvalue_on_a_laplacian():
     enc = laplacian_1d(200)
     root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)))

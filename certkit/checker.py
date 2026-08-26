@@ -37,7 +37,7 @@ from typing import Any, Sequence
 
 from .backward_error import count_eigenvalues_below_backward
 from .banded import count_eigenvalues_below_banded
-from .interval import Iv, IntervalError, dot, sqnorm
+from .interval import CIv, CZERO, Iv, IntervalError, cdot, csqnorm, dot, sqnorm
 from .operators import Operator, decode_operator, operator_ref
 from .schema import SCHEMA_VERSION, SchemaError, h2f, require, verify_seal
 
@@ -149,6 +149,63 @@ def _gershgorin_lower(op: Operator) -> Iv:
                 mag = v.mag_ub
                 radius = radius + Iv(mag, mag)
         low = diag - radius
+        if best is None or low.lo < best.lo:
+            best = low
+    if best is None:
+        raise IntervalError("empty operator")
+    return best
+
+
+def _gershgorin_upper(op: Operator) -> Iv:
+    """A rigorous upper bound on the whole spectrum, from row access alone.
+
+    The mirror image of `_gershgorin_lower`: every eigenvalue lies in some disc
+    centred at a diagonal entry with radius the off-diagonal absolute row sum,
+    so the largest disc ceiling bounds the whole spectrum from above.
+    """
+    best: Iv | None = None
+    for i in range(op.n):
+        entries = op.row(i)
+        diag = entries.get(i, Iv.exact(0.0))
+        radius = Iv.exact(0.0)
+        for j, v in entries.items():
+            if j != i:
+                mag = v.mag_ub
+                radius = radius + Iv(mag, mag)
+        high = diag + radius
+        if best is None or high.hi > best.hi:
+            best = high
+    if best is None:
+        raise IntervalError("empty operator")
+    return best
+
+
+def _gershgorin_lower_complex(op: Operator) -> Iv:
+    """A rigorous lower bound on the real spectrum of a complex Hermitian
+    operator, from row access alone.
+
+    The Gershgorin circle theorem holds for any square matrix, real or
+    complex: every eigenvalue lies in some disc `D(a_ii, R_i)` in the complex
+    plane, with `R_i` the off-diagonal absolute row sum (a modulus sum here,
+    via `CIv.mag_ub`, rather than an absolute-value sum). Hermitian-ness --
+    checked exactly by `DenseHermitianComplex.check_symmetric` -- makes both
+    `a_ii` and every eigenvalue real, so each disc's intersection with the
+    real line, `[a_ii - R_i, a_ii + R_i]`, is what matters, and the identical
+    "smallest left endpoint across all discs is a sound global floor"
+    argument used by `_gershgorin_lower` applies verbatim: whichever disc
+    contains the true lambda_min, its left endpoint is at least the minimum
+    left endpoint over every disc, so that minimum is itself a sound floor.
+    """
+    best: Iv | None = None
+    for i in range(op.n):
+        entries = op.row(i)
+        diag = entries.get(i, CZERO)
+        radius = Iv.exact(0.0)
+        for j, v in entries.items():
+            if j != i:
+                mag = v.mag_ub
+                radius = radius + Iv(mag, mag)
+        low = diag.re - radius
         if best is None or low.lo < best.lo:
             best = low
     if best is None:
@@ -336,6 +393,160 @@ def _rule_gershgorin_rayleigh(op, claim, witness, ctx) -> Verdict:
     return _implies(lo, hi, low.lo, mu.hi, "lambda_min_enclosure", "gershgorin_rayleigh")
 
 
+def _rule_gen_gershgorin_rayleigh(op, claim, witness, ctx) -> Verdict:
+    """The generalized eigenproblem A x = lambda S x: lambda_min(A, S) in
+    [Gershgorin-pencil lower bound, generalized Rayleigh quotient].
+
+    `op` is A, decoded by the framework from `claim["operator_ref"]` as usual.
+    S is resolved here, by hand, from `claim["metric_ref"]` -- there is no
+    second slot in the generic dispatch, so this rule owns that lookup and
+    abstains on its own terms if S was not supplied, exactly like the
+    framework does for a missing A.
+
+    Derivation, from scratch, no source consulted for a constant:
+
+    S is symmetric; take it as a hypothesis that it is also positive definite,
+    which the checker only accepts once it is proven -- see below. Under that
+    hypothesis <u, v>_S := u^T S v is a genuine inner product, and a short
+    computation shows T := S^{-1} A is self-adjoint with respect to it:
+    <Tu, v>_S = u^T A^T S^{-T} S v = u^T A v = u^T S (S^{-1} A) v = <u, Tv>_S,
+    using A^T = A and S^{-T} = S^{-1}. The eigenvalues of T are exactly the
+    generalized eigenvalues (Tv = lambda v  <=>  A v = lambda S v), so the
+    ordinary Rayleigh quotient theorem for self-adjoint operators -- applied
+    in the <.,.>_S inner product space rather than the Euclidean one -- gives,
+    for every nonzero x:
+
+        lambda_min(A, S)  <=  <Tx, x>_S / <x, x>_S  =  (x'Ax) / (x'Sx)  <=  lambda_max(A, S)
+
+    which is the generalized Rayleigh-Ritz upper bound: mu(x) = x'Ax / x'Sx is
+    always a sound upper bound on lambda_min(A, S), for ANY nonzero x -- this
+    is the witness vector, and mu is recomputed here from it, never taken from
+    the witness.
+
+    For the lower bound, the ordinary (ungeneralized) Rayleigh quotient bound
+    holds unconditionally for any symmetric matrix: for every nonzero x,
+    x'Ax lies in ||x||^2 * [lambda_min(A), lambda_max(A)], and the same for S.
+    Both intervals are enclosed matrix-free by Gershgorin discs (already
+    proven sound by `_gershgorin_lower`/`_gershgorin_upper`). Writing
+    a = (x'Ax)/||x||^2 and s = (x'Sx)/||x||^2 -- both real numbers, sitting
+    inside the two Gershgorin-enclosed intervals -- the identity
+    (x'Ax)/(x'Sx) = a/s holds exactly (the ||x||^2 cancels), so this ratio,
+    for EVERY nonzero x, lies inside the interval quotient of the two
+    Gershgorin enclosures. In particular this holds at the x that minimizes
+    the generalized Rayleigh quotient, whose value is lambda_min(A, S) itself
+    -- so lambda_min(A, S) lies in that quotient interval too. Its lower
+    endpoint is therefore a sound, witness-free floor, exactly mirroring how
+    `_gershgorin_lower` alone is the floor in the ungeneralized rule (S = I
+    recovers it exactly: dividing by the degenerate interval [1, 1] is a
+    no-op).
+
+    S positive-definiteness is not assumed -- it is established the same
+    matrix-free way: if the Gershgorin lower bound on S's own spectrum is
+    strictly positive, every eigenvalue of S is positive, which is exactly
+    positive definiteness. If Gershgorin cannot show that (S is not
+    diagonally dominant enough), the rule abstains rather than guess.
+    """
+    x = _witness_vector(witness, op)
+    lo, hi = _enclosure(claim)
+
+    metric_ref = claim.get("metric_ref")
+    require(isinstance(metric_ref, str), "missing metric_ref (S operator reference)")
+    s_enc = ctx.operators.get(metric_ref)
+    if s_enc is None:
+        return _abstain(
+            "metric operator (S) does not match the one the certificate was issued against"
+            if ctx.operators else "no metric operator supplied",
+            rule="gen_gershgorin_rayleigh",
+        )
+    s_op = decode_operator(s_enc)
+    if s_op.n != op.n:
+        return _abstain(
+            "metric operator dimension does not match the primary operator",
+            rule="gen_gershgorin_rayleigh",
+        )
+
+    s_low = _gershgorin_lower(s_op)
+    if not s_low.is_positive:
+        return _abstain(
+            "cannot prove S positive definite from Gershgorin discs",
+            rule="gen_gershgorin_rayleigh",
+        )
+    s_high = _gershgorin_upper(s_op)
+    a_low = _gershgorin_lower(op)
+    a_high = _gershgorin_upper(op)
+
+    a_spec = Iv(a_low.lo, a_high.hi)
+    s_spec = Iv(s_low.lo, s_high.hi)
+    floor = a_spec / s_spec  # sound: s_spec is strictly positive, never straddles zero
+
+    xv = [Iv.exact(v) for v in x]
+    sx = s_op.apply(xv)
+    sxx = dot(xv, sx)
+    if not sxx.is_positive:
+        return _abstain(
+            "witness vector is (or may be) S-degenerate",
+            rule="gen_gershgorin_rayleigh",
+        )
+    ax = op.apply(xv)
+    mu = dot(xv, ax) / sxx
+
+    if floor.lo > mu.hi:
+        return _abstain(
+            "Gershgorin pencil bound exceeds the generalized Rayleigh quotient "
+            "(inconsistent witness)",
+            rule="gen_gershgorin_rayleigh",
+        )
+    return _implies(lo, hi, floor.lo, mu.hi, "lambda_min_enclosure", "gen_gershgorin_rayleigh")
+
+
+def _rule_hermitian_gershgorin_rayleigh(op, claim, witness, ctx) -> Verdict:
+    """lambda_min in [Gershgorin floor, Re<x|A|x>/<x|x>], for complex
+    Hermitian A. The complex analogue of `gershgorin_rayleigh`: no gap, no
+    factorisation -- just operator application and row access, generalised
+    from the real inner product to the Hermitian one.
+
+    Derivation, from scratch:
+
+    mu(x) := <x|A x> / <x|x>, with <u|v> := sum_i conj(u_i) v_i, is the
+    Hermitian Rayleigh quotient. It is a sound upper bound on lambda_min(A)
+    for every nonzero complex x -- the Rayleigh-Ritz variational theorem for
+    self-adjoint operators, applied in the Hermitian inner-product space
+    rather than the real Euclidean one (the same theorem `gershgorin_rayleigh`
+    already relies on for real symmetric A, since real-symmetric is the
+    special case of Hermitian with a zero imaginary part throughout).
+
+    mu(x) is also always a real number when A is Hermitian:
+    conj(<x|Ax>) = <Ax|x> = x^H A^H x = x^H A x = <x|Ax>
+    (using A^H = A, Hermitian by hypothesis and checked exactly by
+    `DenseHermitianComplex.check_symmetric`), so <x|Ax> equals its own
+    conjugate and is real. `cdot(x, ax)` -- built from already-sound `CIv`
+    arithmetic -- therefore encloses a genuinely real complex number, and its
+    `.re` component is a sound `Iv` enclosure of that real value; the `.im`
+    component is guaranteed (by the same argument, plus soundness of the
+    enclosure) to enclose zero, but is not needed for anything here.
+
+    Lower bound: `_gershgorin_lower_complex`, unconditional and witness-free,
+    exactly mirroring how `_gershgorin_lower` alone is the floor in
+    `gershgorin_rayleigh`.
+    """
+    x = _cwitness_vector(witness, op)
+    lo, hi = _enclosure(claim)
+    nx2 = csqnorm(x)
+    if not nx2.is_positive:
+        return _abstain(
+            "witness vector is (or may be) zero", rule="hermitian_gershgorin_rayleigh"
+        )
+    ax = op.apply(x)
+    mu = cdot(x, ax).re / nx2
+    low = _gershgorin_lower_complex(op)
+    if low.lo > mu.hi:
+        return _abstain(
+            "Gershgorin bound exceeds the Rayleigh quotient (inconsistent witness)",
+            rule="hermitian_gershgorin_rayleigh",
+        )
+    return _implies(lo, hi, low.lo, mu.hi, "lambda_min_enclosure", "hermitian_gershgorin_rayleigh")
+
+
 def _rule_gershgorin(op, claim, witness, ctx) -> Verdict:
     """Every eigenvalue is at least `bound`. Witness-free: the operator is it."""
     bound = h2f(claim.get("bound"))
@@ -461,6 +672,10 @@ RULES = {
     "temple_inertia": ("lambda_min_enclosure", _rule_temple_inertia, True),
     "temple_ref": ("lambda_min_enclosure", _rule_temple_ref, True),
     "gershgorin_rayleigh": ("lambda_min_enclosure", _rule_gershgorin_rayleigh, True),
+    "gen_gershgorin_rayleigh": ("lambda_min_enclosure", _rule_gen_gershgorin_rayleigh, True),
+    "hermitian_gershgorin_rayleigh": (
+        "lambda_min_enclosure", _rule_hermitian_gershgorin_rayleigh, True,
+    ),
     "gershgorin": ("spectrum_lower_bound", _rule_gershgorin, False),
     "rayleigh": ("lambda_min_upper_bound", _rule_rayleigh, True),
     "inertia": ("eigenvalue_count_below", _rule_inertia, False),
@@ -468,6 +683,16 @@ RULES = {
     "sturm_be": ("eigenvalue_count_below", _rule_sturm_be, False),
     "combine": ("lambda_min_enclosure", _rule_combine, False),
 }
+
+# Rules built on `CIv` (complex-interval) arithmetic, valid only against a
+# complex operator backend. Every other rule assumes `op.row`/`op.apply`
+# return `Iv`, not `CIv` -- calling one against the wrong backend would not
+# produce a false VERIFIED (the value types are incompatible and arithmetic
+# between them raises), but it would crash `check()` uncaught instead of
+# abstaining, which `_verify_uncached`'s dispatch guard below exists to
+# prevent.
+COMPLEX_RULES = frozenset({"hermitian_gershgorin_rayleigh"})
+COMPLEX_OPERATOR_KINDS = frozenset({"dense_hermitian_complex"})
 
 
 # -- claim field helpers --------------------------------------------------
@@ -483,6 +708,16 @@ def _witness_vector(witness: dict, op: Operator) -> list[float]:
     xh = witness.get("vector")
     require(isinstance(xh, list) and len(xh) == op.n, "witness vector shape mismatch")
     return [h2f(v) for v in xh]
+
+
+def _cwitness_vector(witness: dict, op: Operator) -> list[CIv]:
+    xh = witness.get("vector")
+    require(isinstance(xh, list) and len(xh) == op.n, "witness vector shape mismatch")
+    out = []
+    for entry in xh:
+        require(isinstance(entry, dict), "complex witness entry must be an object")
+        out.append(CIv(Iv.exact(h2f(entry.get("re"))), Iv.exact(h2f(entry.get("im")))))
+    return out
 
 
 # -- core -----------------------------------------------------------------
@@ -518,7 +753,15 @@ def _verify_uncached(cert: Any, ctx: Context) -> Verdict:
                 if ctx.operators else "no operator supplied",
                 claim_kind=kind, rule=rule,
             )
-        return handler(decode_operator(enc), claim, witness, ctx)
+        op = decode_operator(enc)
+        is_complex_op = op.kind in COMPLEX_OPERATOR_KINDS
+        is_complex_rule = rule in COMPLEX_RULES
+        if is_complex_op != is_complex_rule:
+            return _abstain(
+                f"rule {rule!r} is not compatible with operator kind {op.kind!r}",
+                claim_kind=kind, rule=rule,
+            )
+        return handler(op, claim, witness, ctx)
 
     except Unresolved as exc:
         return _abstain(f"dependency: {exc}")
