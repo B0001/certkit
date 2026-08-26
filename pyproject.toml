@@ -37,3 +37,11 @@ park = ["certkit-jcb"]
 # persistent volume every worker re-downloads elan and mathlib and throws it
 # away at session end -- that is where four days of the Aug 22 run went.
 volumes = ["claude-elan:/home/node/.elan"]
+
+[tool.sandbox.env]
+# The Lean toolchain lives in the claude-elan volume, but elan puts its PATH
+# line in ~/.bashrc -- which is in the container's ephemeral layer and is wiped
+# every session, while the volume persists. Without this the 3GB toolchain is
+# present and invisible, and the worker re-installs it. Rest of the value is
+# the claude image's own default PATH, unchanged.
+PATH = "/home/node/.elan/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
