@@ -21,3 +21,19 @@ include = ["certkit*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+# The worker loop itself lives in the verified-sandbox package (installed with
+# `uv tool install --editable`, deliberately NOT a dependency of this project --
+# the checker's `dependencies = []` is the point of the repo). Only what
+# genuinely differs per repo lives here; see that package's README for every key.
+[tool.sandbox]
+# certkit-jcb asks for an independent human to read interval.py and
+# backward_error.py against their derivations. A worker reviewing code written
+# by a model is not an independent reviewer, and closing it would destroy the
+# only record that the soundness argument is unreviewed. Never dispatch it.
+park = ["certkit-jcb"]
+
+# The Lean beads (8y2.*) need a toolchain the image does not carry. Without a
+# persistent volume every worker re-downloads elan and mathlib and throws it
+# away at session end -- that is where four days of the Aug 22 run went.
+volumes = ["claude-elan:/home/node/.elan"]
