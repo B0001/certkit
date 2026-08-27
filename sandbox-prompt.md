@@ -54,12 +54,27 @@ the conclusion.** Softening a stated limitation because a metric moved is a
 regression even when every test still passes.
 
 **Do not describe the Lean side as proved.** `lean/Certkit/Soundness.lean`
-states seven obligations against mathlib4 and every one ends in `sorry`. The
-file has never been compiled here. One of the seven,
-`sweep_backward_bound`, is currently stated as `True` — the obligation with
-the worst failure mode is not yet even written down. Saying otherwise anywhere
-in the repo is a false claim about the thing this repo exists to be careful
-about.
+states seven soundness obligations against mathlib4. Six of them —
+`rayleigh_ritz_min`, `residual_encloses_some_eigenvalue`, `temple_lower`,
+`inertia_count_below`, `gershgorin_lower`, `weyl_shift` — end in `sorry` and
+are a specification of intent, not a verified artifact. The seventh,
+`sweep_backward_bound`, is a real, zero-`sorry` proof (formalized under
+certkit-8y2.2, closed): it discharges the one-rounding-per-operation model and
+the per-step collection into the `eta`/`gamma` factors `backward_error.py`
+uses. Do not read that as license to call the other six proved, or this file
+"soundness-complete" — and re-grep the file for `sorry` before trusting this
+count, since certkit-8y2.3 and certkit-8y2.4 are open/in_progress and may
+change it. Of the six still open, `weyl_shift`'s own doc comment flags a
+specific, currently uncovered gap — the relation between the entrywise/
+row-sum bound `sturm_be` computes at runtime and the L2 operator norm
+`weyl_shift` is stated against — which is arguably a better candidate for
+"the obligation with the worst failure mode not yet even written down" than
+`sweep_backward_bound`, which is finished. Whether `lake build Certkit`
+succeeds as a whole is a separate, unsettled question (see certkit-8y2.4 on
+pre-existing type-class errors); don't conflate an individual theorem
+compiling via `lake env lean` with the whole-file build passing. Saying
+otherwise anywhere in the repo is a false claim about the thing this repo
+exists to be careful about.
 
 ## Known baseline — do not mistake this for your own breakage
 
