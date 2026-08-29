@@ -40,12 +40,17 @@ park = ["certkit-jcb"]
 # other half, and it needs its own volume rather than falling through to the
 # bind-mounted host tree: the host builds into lean/.lake too, and two lake
 # builds sharing one tree fight over traces. One volume is still shared by all
-# workers, so this separates host from workers, not workers from each other --
-# set max-workers if concurrent 8y2.* beads ever collide.
+# workers, so this separates host from workers, not workers from each other.
 volumes = [
     "claude-elan:/home/node/.elan",
     "claude-certkit-lake:/workspace/lean/.lake",
 ]
+
+# The claude-certkit-lake volume is shared by every worker, so two concurrent
+# Lean beads would build into it at once and fight over lake traces -- the same
+# host-vs-worker problem the volume fixes, now worker-vs-worker. Serialise until
+# the .lake sharing is per-worker. (default is 25)
+max-workers = 1
 
 [tool.sandbox.env]
 # The Lean toolchain lives in the claude-elan volume, but elan puts its PATH
