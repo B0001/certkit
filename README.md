@@ -444,8 +444,8 @@ certkit/banded.py     banded LDL^T / Sturm counting          TRUSTED
 certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
 certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
-lean/Certkit/         soundness obligations in Lean 4       statements only
-tests/                106 tests: fuzz, backends, composition, counting, adversarial, boundary
+lean/Certkit/         soundness obligations in Lean 4       4 of 7 proved
+tests/                165 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
 
 The trust boundary is enforced mechanically, not by comment.
@@ -470,10 +470,11 @@ of trusted preprocessing this design refuses.
 
 ## The Lean side
 
-`lean/Certkit/Soundness.lean` states the four obligations (Rayleigh–Ritz,
-Temple, Sylvester inertia, Gershgorin) against mathlib4. **Every proof is
-`sorry` and the file has not been compiled here.** It is a specification of
-intent that pins the Python checker to named theorems; discharging them is a
+`lean/Certkit/Soundness.lean` states seven soundness obligations against
+mathlib4 and compiles clean against the pinned mathlib. Four are real,
+zero-`sorry` proofs (Rayleigh–Ritz, Sylvester inertia, Gershgorin, and the
+backward-error sweep bound); three are still `sorry` (the residual-encloses
+claim, Temple's lower bound, the Weyl shift). Discharging the last three is a
 milestone in itself, and the interval-arithmetic layer is the one after that.
 
 ## Known limits

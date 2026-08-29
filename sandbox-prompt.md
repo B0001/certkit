@@ -78,7 +78,7 @@ exists to be careful about.
 
 ## Known baseline — do not mistake this for your own breakage
 
-The suite is **fully green**: `106 passed`. There is no documented
+The suite is **fully green**: `165 passed`. There is no documented
 pre-existing failure to excuse one.
 
 **Any failure at all is yours and must be fixed before you close a bead.**
@@ -118,7 +118,7 @@ If `bd ready` is empty, that means file new beads, not that you are done.
 
   ```
   uv sync --extra dev
-  uv run pytest tests          # 106 passed, about 5 seconds
+  uv run pytest tests          # 165 passed, about 24 seconds
   ```
 
 - **Verify the trust boundary the cheap way** — the checker must run on an
