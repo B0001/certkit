@@ -36,7 +36,16 @@ park = ["certkit-jcb"]
 # The Lean beads (8y2.*) need a toolchain the image does not carry. Without a
 # persistent volume every worker re-downloads elan and mathlib and throws it
 # away at session end -- that is where four days of the Aug 22 run went.
-volumes = ["claude-elan:/home/node/.elan"]
+# The elan volume covers only the toolchain. mathlib's 7.5G build tree is the
+# other half, and it needs its own volume rather than falling through to the
+# bind-mounted host tree: the host builds into lean/.lake too, and two lake
+# builds sharing one tree fight over traces. One volume is still shared by all
+# workers, so this separates host from workers, not workers from each other --
+# set max-workers if concurrent 8y2.* beads ever collide.
+volumes = [
+    "claude-elan:/home/node/.elan",
+    "claude-certkit-lake:/workspace/lean/.lake",
+]
 
 [tool.sandbox.env]
 # The Lean toolchain lives in the claude-elan volume, but elan puts its PATH
