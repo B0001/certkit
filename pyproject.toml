@@ -31,7 +31,12 @@ pythonpath = ["."]
 # backward_error.py against their derivations. A worker reviewing code written
 # by a model is not an independent reviewer, and closing it would destroy the
 # only record that the soundness argument is unreviewed. Never dispatch it.
-park = ["certkit-jcb"]
+#
+# certkit-ph1: six worker sessions have each re-confirmed the coverage cliff
+# is infeasible for every named approach (matvec-oracle lower bound proven;
+# term-count / banded / FEAST / fill-reducing all ruled out by computation).
+# It needs a human close-or-rescope call, not more worker-hours.
+park = ["certkit-jcb", "certkit-ph1"]
 
 # The Lean beads (8y2.*) need a toolchain the image does not carry. Without a
 # persistent volume every worker re-downloads elan and mathlib and throws it
