@@ -3,34 +3,28 @@
 ## Outcome
 
 **Bead left OPEN, claimed.** No code changed in `certkit/`, `tests/`, or
-`examples/`. This is the fourth session on this bead. Sessions 1-3 tried
-three concrete subspace-based counting methods (plain Lanczos, shift-invert
-Lanczos, Chebyshev-filtered subspace) and found, empirically, that all three
-need the subspace dimension k to be a large constant fraction of n before the
-global block-residual a Weyl-counting argument needs drops below threshold —
-up to k/n=0.95 in the worst (critical TFIM) case tested, and no better than
-k/n≈0.75 even in the single most favorable case tested (deep-paramagnetic
-TFIM). Session 3's explicit top recommendation for whoever picked this up
-next: "construct an adversarial argument for *why* k=Omega(n) is necessary
-... which would let this bead be closed as 'shown infeasible for this
-operator family' rather than left perpetually open pending the next attempt."
-
-This session did exactly that: it builds, and computationally verifies, an
-adversarial matrix-vector-query lower bound proving that **no algorithm
-restricted to k adaptive matvec-oracle queries** (which covers Lanczos,
+`examples/`. This is the sixth session on this bead. Session 4 built a
+rigorous adversarial matvec-oracle lower bound proving that no algorithm
+restricted to k < n-2 adaptive `apply()`-only queries (which covers Lanczos,
 shift-invert Lanczos, Chebyshev-filtered subspace, and any future variant in
-that family, since all of them only ever touch the operator through
-`op.apply()`) **can be sound past k = n - 3**, in the worst case, for the
-specific counting task this bead needs (deciding "exactly 1 eigenvalue below
-beta" vs. "exactly 2"). This generalizes sessions 1-3's per-construction
-empirical findings into a single proof covering the entire query model, not
-just the three constructions actually tried. It does **not** discharge the
-bead — the acceptance criterion asks for a working counting rule, and this
-session produced the opposite: a rigorous reason why the entire family the
-bead's obvious approach lives in cannot work in the worst case. See "What
-this does and does not establish" below for the precise scope, including the
-one door this leaves open (methods that read Pauli-sum term structure
-directly, rather than treating the operator as an opaque matvec oracle).
+that family) can be sound for deciding "exactly 1 eigenvalue below beta" in
+the worst case. That closed off the entire matvec-oracle subspace family.
+Session 5 closed three more doors by computation rather than argument: JW
+term-count exploitation (not viable for q<=14), the in-repo banded/Sturm
+route applied to Pauli sums (structurally inapplicable past ~7 qubits), and
+FEAST/contour-integral counting (soundness-incompatible — needs stochastic
+trace estimation). Session 5's handoff flagged exactly one concretely-named
+door as still untried: a fill-reducing *sparse, non-banded* elimination
+order (nested dissection / minimum degree) for `PauliSumReal` LDL^T, as
+opposed to the banded route's fixed-bandwidth failure.
+
+**This session closed that door too, by direct computation, not
+speculation.** See "Session 6" below. Every concretely-named avenue any of
+the six sessions has proposed is now closed off with either a proof or a
+reproducible computation. This session did **not** make the human judgment
+call sessions 4 and 5 both declined — same reason: the acceptance criteria
+asks for a working counting rule to exist, and nothing found this session
+(or any session) is one.
 
 ## What the acceptance criterion requires
 
@@ -38,359 +32,433 @@ directly, rather than treating the operator as an opaque matvec oracle).
 > factorisation, giving a Temple-quality width on a Pauli-sum operator of at
 > least 256 dimensions.
 
-Concretely: prove "exactly one eigenvalue of A lies below beta" for a
-256-16384-dimensional Pauli-sum Hamiltonian using only `op.apply`/`op.row`,
-cheaply enough to be worth having. `temple_inertia` already does this exactly
-via O(n^3) interval LDL^T, gated at `DENSE_LIMIT = 160`. Not met this session.
+Not met this session, same as sessions 1-5. Nothing below is a working rule.
 
-## Recap: sessions 1-3, in one paragraph each
+## Session 6: fill-reducing sparse LDL^T — closed off (computed)
 
-- **Session 1**: plain Lanczos subspace + global block-residual Weyl
-  counting. One variant (disjoint-balls shortcut) is unsound with an explicit
-  counterexample; the sound variant plateaus at O(1)-O(10) block residual
-  regardless of Krylov depth on critical TFIM.
-- **Session 2**: shift-invert Lanczos and a genuinely-gapped Hamiltonian
-  (instead of critical TFIM) — both negative, same underlying reason.
-- **Session 3**: Chebyshev-filtered subspace — negative, with a mechanism
-  (Chebyshev equioscillation gives O(1), non-decaying response for points
-  above beta, so a threshold filter gives zero discrimination among the
-  "above" eigenvalues once beta is fixed at the lam1/lam2 midpoint). Also
-  ran the first k/n scaling sweep (up to k/n=0.95): critical TFIM never
-  crosses the needed threshold and gets *worse* at larger n; the best case
-  tested (deep-paramagnetic TFIM) crosses only at k/n≈0.75. Flagged, but did
-  not attempt, the adversarial-lower-bound direction this session pursues.
+One scratch, numpy-free prototype,
+`sandbox-handoffs/certkit-ph1-fillreducing-experiment.py`, rerunnable
+directly with `uv run python sandbox-handoffs/certkit-ph1-fillreducing-experiment.py`
+(imports the session-5 JW-transform script by file path to reuse its
+from-scratch Jordan-Wigner code; both stay numpy-free).
 
-## This session's work: an adversarial matvec-oracle lower bound
+**The question**: `count_eigenvalues_below_banded` in `certkit/banded.py`
+already does sparse-aware interval LDL^T, but only within a fixed bandwidth
+around the diagonal — and session 5 showed that fails structurally for
+`PauliSumReal` past ~7 qubits, because a single-qubit term's bit-flip mask
+alone puts a nonzero entry at column-distance `2^k`. But *bandwidth* is only
+one specific way to exploit sparsity. A fill-reducing elimination order
+(nested dissection, minimum degree — what real sparse solvers like
+CHOLMOD/SuiteSparse actually use) reorders rows/columns to keep the LDL^T
+factor sparse *without* requiring the reordered matrix to be literally
+banded. Does that route change the asymptotic picture?
 
-Two scratch scripts, both throwaway numpy prototypes under
-`sandbox-handoffs/`, same discipline as sessions 1-3's — not part of the
-trusted or test tree, rerunnable directly with `uv run python <script>`.
+**Key structural fact, established first**: a `PauliSumReal` term with a
+nonzero bit-flip mask `m` (any X/Y factor) connects computational-basis
+state `i` to `i^m`, for every `i`. So the *sparsity graph* of the whole
+operator is exactly the Cayley graph on `Z_2^q` generated by the set of
+distinct masks appearing in the term list — diagonal Z-only terms
+(mask=0) contribute no edges. For a TFIM-shaped Hamiltonian like
+`examples/sample/pauli_operator.json` (one X term per qubit, so masks =
+{1,2,4,...,2^(q-1)}), this graph is exactly the q-dimensional hypercube
+`Q_q`. This means the fill-reducing-order question reduces to a concrete,
+checkable graph question rather than staying an abstract worry.
 
-### Part 1 — non-adaptive case (`certkit-ph1-lowerbound-experiment.py`)
-
-The easy case, to build the mechanism before adaptivity: an explicit pair of
-symmetric n×n matrices A0, A1, built from a random orthonormal basis split
-into a k-dimensional "query" subspace D and an (n-k)-dimensional hidden
-complement W. D gets a "boring" large-diagonal block with zero cross-terms
-into W, so any matvec against a vector living in D is determined entirely by
-the D-block and never touches W. A0 and A1 are identical on D and differ only
-inside a 2-dimensional slice of W: A0 plants eigenvalues {-3, +4} there (1
-eigenvalue below beta=0), A1 plants {-3, -1} (2 eigenvalues below beta=0). A
-fixed set of k < n query vectors (an orthonormal basis of D) gets *exactly*
-identical responses from A0 and A1 — verified to machine precision
-(`max |A0 v_i - A1 v_i| < 1.5e-14` over all k query vectors at n=40, k=12),
-and the indistinguishability survives repeated application (Krylov depth 5
-checked directly, not just asserted). Since D is invariant under A0 and A1
-individually (both are block-diagonal in the D/W split), any Krylov space
-built purely from D-vectors never leaves D and never sees the discriminating
-block in W, for any depth.
-
-This establishes the *worst-case* claim precisely: no deterministic function
-of {A v_1, ..., A v_k} can be sound for "exactly 1 eigenvalue below beta" for
-both A0 and A1, when the v_i are fixed independent of A. This is the textbook
-easy case (non-adaptive queries) of a matvec-query lower bound.
-
-### Part 2 — adaptive case (`certkit-ph1-adaptive-adversary-experiment.py`)
-
-Real algorithms (Lanczos and its variants) don't fix their query vectors in
-advance — each new query is a function of the *responses* to previous ones.
-An `OnlineAdversary` closes that gap: it never commits to a fixed matrix.
-It lazily builds a random tridiagonal (Jacobi) chain, exposing exactly one
-new orthonormal direction per query, and answers each query consistently
-with the standard 3-term Lanczos recurrence against that (still-growing)
-chain:
+**Result 1 — how good can any balanced separator of `Q_q` be, in closed
+form.** Edges of `Q_q` only connect Hamming weights differing by exactly 1,
+so removing the single layer at weight `L = q//2` disconnects
+`{weight < L}` from `{weight > L}` — a constructive, elementary balanced
+separator of size `C(q, q//2)` (verified computationally to be a legitimate
+cut for q up to 24; not merely asserted):
 
 ```
-A u_m = alpha_m u_m + beta_{m-1} u_{m-1} + beta_m u_{m+1}
+   q          n      below        sep      above      sep/n
+   6         64         22         20         22     0.3125
+   8        256         93         70         93     0.2734
+  10       1024        386        252        386     0.2461
+  12       4096       1586        924       1586     0.2256
+  14      16384       6476       3432       6476     0.2095
+  16      65536      26333      12870      26333     0.1964
+  20    1048576     431910     184756     431910     0.1762
+  24   16777216    7036530    2704156    7036530     0.1612
 ```
 
-`alpha_m` and `beta_{m-1}` were fixed on the *previous* call (when `u_m` was
-created); `beta_m` and `u_{m+1}` are manufactured fresh, right now, in
-response to this call. This is exactly what an honest Lanczos process
-against a genuine random tridiagonal matrix produces — the matrix is only
-"real" up to however far the process has gone. After the driver's own
-orthogonalization step, the residual is exactly `beta_m * u_{m+1}` — nonzero
-and new by construction, so the process never stalls or finds an invariant
-subspace early (two earlier, simpler adversary designs *did* stall — see
-"Numerical construction notes" below — which is why the final design uses a
-genuinely chained tridiagonal structure, not disjoint blocks).
+`sep/n` shrinks only as `1/sqrt(q)` (Stirling on the central binomial
+coefficient), i.e. **polylog** in `n`, not polynomially — nowhere near the
+`O(sqrt(n))`-style separators (planar graphs, 1D/2D meshes) that make
+nested dissection give genuinely sub-cubic factorization. This alone
+predicts nested dissection on this graph gives at best a polylog
+improvement over dense, not an asymptotic one.
 
-After k adaptive queries, the adversary has pinned k+1 directions (one ahead
-of the driver's frontier). Everything the driver has seen so far is
-consistent with *every* completion of A that (a) matches the revealed
-tridiagonal block on the pinned directions, and (b) is anything at all,
-block-diagonally, on the remaining n-(k+1)-dimensional complement. At the
-end, `reveal()` produces two such completions — A0 (exactly 1 eigenvalue
-below beta) and A1 (exactly 2) — using the same discriminator-planting trick
-as Part 1, and needs at least 2 free (unpinned) dimensions to do it. Since
-one direction gets pinned per query, this is possible for any
-**k ≤ n - 3** (k+1 pinned, leaving n-k-1 ≥ 2 free) — the theoretical maximum
-depth this construction supports.
-
-**Verified at exactly that maximum**: n=30, k=n-3=27 (k/n=0.90), run through
-the script's own `main()`:
+**Result 2 — direct measurement, not just the separator argument.** Ran
+greedy minimum-degree symbolic elimination (the standard practical
+fill-reducing heuristic; picks the lowest-degree remaining vertex at each
+step, adds fill edges among its still-remaining neighbors, repeats) on the
+actual sparsity graph, for both the pure-hypercube TFIM case and a
+JW-mapped two-body chemistry-shaped case (reusing session 5's from-scratch
+JW transform for realistic masks, M = 4..11 qubits, seed=1). Tracked total
+fill edges and an operation-count proxy (sum of pivot-degree^2, which
+tracks LDL^T arithmetic cost the same way `count_eigenvalues_below_banded`'s
+`O(n*b^2)` claim tracks banded cost):
 
 ```
-n=30, k=n-3=27 (the theoretical max for this construction), Lanczos ran 27 steps against the online adversary
-adversary pinned 28 directions (1 ahead of the driver's frontier, as claimed)
-revealed A0: 1 eigenvalues below beta (want 1)
-revealed A1: 2 eigenvalues below beta (want 2)
-max |A0 v - A1 v| replayed over all 27 Lanczos queries: 7.916e-09
+TFIM-shaped (pure hypercube):
+   q        n   fill_edges       op_proxy   max_deg      dense_n^3    ops/n^3
+   4       16           27            255         6           4096    0.06226
+   6       64          432           8680        24         262144    0.03311
+   8      256         6502         451854       101       16777216    0.02693
+  10     1024       102336       28354080       407     1073741824    0.02641
+  11     2048       423015      241857629       863     8589934592    0.02816
+  12     4096      1621072     1810094704      1631    68719476736    0.02634
+
+JW two-body chemistry-shaped:
+   M        n  #masks   fill_edges       op_proxy   max_deg      dense_n^3    ops/n^3
+   4       16       7            0            280         7           4096    0.06836
+   6       64      30           30          20710        30         262144    0.07900
+   8      256      98         3520        1337656       120       16777216    0.07973
+  10     1024     255       126880       85771936       480     1073741824    0.07988
+  11     2048     385       635910      687565286       963     8589934592    0.08004
 ```
 
-Robustness check across 6 independent seeds at the same n=30, k=n-3=27
-boundary: counts were (1, 2) in every run; max replayed response difference
-ranged 1.5e-11 to 7.9e-09 — all far below the ~5-7 unit gap between the
-planted eigenvalues, i.e. genuinely indistinguishable, not a fluke of one
-seed. Smaller n (n=20, k=17) gives even cleaner separation (max diff
-~1e-11 to 3e-11); this is a float64-precision effect, not a change to the
-underlying exact-arithmetic construction — see the note below.
+`ops/n^3` **converges to a constant** (~0.026 for TFIM, ~0.08 for the JW
+case) rather than shrinking as n grows — confirmed across three doublings
+of n in each case, not just two points. `max_deg` also grows linearly in n
+(≈0.4n for TFIM, ≈0.47n for JW), meaning the *tail* of the elimination
+order is working against a graph that has become nearly complete — exactly
+what the slow-shrinking separator in Result 1 predicts.
 
-**An actual adaptive Lanczos run of depth k=n-3, which never stalled or
-found an invariant subspace early, received identical responses whether the
-true operator is A0 (satisfies the Temple gap hypothesis) or A1 (does not).
-It cannot have told them apart, regardless of what it did with the k
-responses afterward.** This is the generalization sessions 1-3 were missing:
-it isn't specific to Lanczos, shift-invert Lanczos, or Chebyshev-filtered
-subspace — it rules out *any* algorithm in the matvec-oracle model, at the
-exact worst-case depth, not just the three constructions actually tried.
+**Conclusion**: minimum-degree fill-reducing ordering does not change the
+growth *order* of the LDL^T cost for `PauliSumReal` operators — it only
+buys a roughly constant 13x-38x reduction versus literal dense O(n^3) in
+the sizes tested, and Result 1's separator-shrinkage argument says that
+constant does not keep improving as n grows past what was tested here. A
+13-38x constant factor does not turn an hour-scale dense route at n~10^4-10^5
+into anything practical, and does not meet the acceptance criterion's "without
+an O(n^3) dense factorisation" bar — the growth order is still cubic, just
+with a smaller leading constant. This is the same conclusion session 5
+reached for the banded case, now shown to also hold for the strictly more
+general sparse-reordering case that session 5 flagged as untried and
+potentially favorable.
 
-### Numerical construction notes (why the final design looks the way it does)
+This closes off the one concretely-named door left open after session 5.
+See "Cumulative state" below for the complete list.
 
-Recorded so a future session doesn't have to rediscover any of this by
-re-deriving the same bugs:
+## Sessions 1-5's results (unchanged, kept for context)
 
-- **Two earlier adversary designs stalled trivially** and did not exercise
-  the bound at any real depth. A design that pins one direction per query
-  with a pure-diagonal (uncoupled) structure makes the query vector an exact
-  eigenvector of the block seen so far — Lanczos converges in 1 step
-  (verified algebraically: the residual becomes exactly 0 after the standard
-  orthogonalization subtraction). A design that pins an isolated 2×2 coupled
-  block per query is a closed invariant subspace with no further coupling
-  out — Lanczos exhausts it and converges in exactly 2 steps. The final
-  design (a single *chained* tridiagonal, one new direction per query, 3-term
-  recurrence coupling it to its neighbors) has no such closed subspace and
-  does not stall.
-- **The alpha/beta magnitude ratio is a genuine, non-arbitrary tuning
-  constraint, not cosmetic.** It has to satisfy two competing requirements
-  at once: (a) `alpha - 2*beta > 0` with real margin, so the pinned
-  tridiagonal block's own spectrum (which spreads roughly like a discrete
-  Laplacian, `[alpha_mean - 2*beta_mean, alpha_mean + 2*beta_mean]`) clears
-  `beta_threshold=0` and doesn't accidentally contaminate the "boring" block
-  with unplanned eigenvalues below the threshold (this was hit directly: an
-  earlier tuning attempt with alpha/beta both ~O(1) produced pinned-block
-  eigenvalue counts of 17-18 instead of the intended 1-2, because the
-  Laplacian-type spread reached below 0); and (b) the ratio has to stay
-  *close* to 2, not just above it, because replaying the construction in
-  float64 uses a forward 3-term recurrence, and forward recurrences for this
-  kind of relation are a known-unstable numerical pattern — roundoff in the
-  "wrong" (spuriously amplified) solution direction grows geometrically each
-  step by roughly the dominant root of `lambda^2 - (alpha/beta)*lambda + 1 =
-  0`, which is 1 (marginal, no growth) exactly at ratio=2 and grows quickly
-  as the ratio increases (empirically ~4.5x/step was observed at ratio≈5,
-  which only permitted about 15 clean steps before an artificial stall).
-  Ratio 2.5 (alpha in [4,5], beta in [1.6,2.0]) is the empirical compromise
-  used in the final script — enough margin for (a), slow enough roundoff
-  growth (~2x/step) for (b) to reach the k=n-3 boundary cleanly at n up to a
-  few dozen.
-- **This tuning is float64-replay plumbing, not part of the mathematical
-  argument.** The exact-arithmetic claim ("the adversary can always answer
-  consistently while ≥2 free dimensions remain") is elementary linear
-  algebra and doesn't depend on any of this; the numerical replay is only
-  there to make the claim checkable by running actual code end-to-end
-  (including an actual `np.linalg.eigvalsh` count, not a hand proof), and
-  float64 precision is what currently bounds how large an n this repo's
-  scratch scripts can demonstrate it at cleanly (n≈20-40 is clean; n=200 was
-  tried during tuning and reliably produced response differences in the
-  1e-2 to 4e-2 range by depth n-3 — no longer a small-perturbation
-  demonstration, so not used for the headline number, though the counts
-  were still correct at 1 vs 2 every time).
+All three are scratch, throwaway numpy-free prototypes under
+`sandbox-handoffs/`, rerunnable directly:
 
-## What this does and does not establish
+```
+uv run python sandbox-handoffs/certkit-ph1-jw-termcount-experiment.py
+uv run python sandbox-handoffs/certkit-ph1-bandwidth-check-experiment.py
+uv run python sandbox-handoffs/certkit-ph1-feast-soundness-experiment.py
+```
 
-**Establishes**: for the abstraction every rule in `certkit/checker.py`
-currently uses to interact with an `Operator` — a sequence of matrix-vector
-products, `op.apply(v)`, chosen adaptively — no algorithm can be a sound
-source of "exactly 1 eigenvalue below beta" using fewer than n-2 queries, in
-the worst case over symmetric operators. This directly and rigorously
-generalizes sessions 1-3's finding ("3 tried constructions all need k close
-to n") into a statement about the *entire* family those three constructions
-belong to, including any future variant (randomized Lanczos, block Lanczos,
-restarted Lanczos, etc.) that still only touches the operator through
-`apply()`.
+### 1. JW Pauli term count vs. n — computed, not just reasoned
 
-**Does not establish**:
+Session 4 reasoned, without checking, that JW-mapped chemistry Hamiltonians
+have Pauli term count T ~ O(q^4), comparable to or exceeding n = 2^q for
+q in [8,14] (the bead's motivating range: H2 q=4, H4 q=8, N2 q=12), and
+concluded "exploit low term count" is therefore not promising there.
 
-- That a method which explicitly reads the Pauli-sum term structure (the
-  number and pattern of Pauli terms `H = sum_t c_t P_t`, rather than
-  treating `apply()` as an opaque oracle) couldn't do better. The lower
-  bound above is proved for the matvec-oracle abstraction specifically,
-  because that's what `op.apply()`/`op.row()` give every rule in this
-  repo — but nothing stops a *new* rule from being written against
-  `PauliSumReal`'s actual term list instead of going through the generic
-  `Operator` interface, and the adversary construction here says nothing
-  about that case. This remains open.
-- I reasoned, but did not verify against real data in this repo, that "low
-  term count" is not a promising angle for closing that gap at the sizes
-  this bead cares about: JW-mapped chemistry Hamiltonians have term count T
-  scaling roughly O(q^4) in qubit count q, which is comparable to or exceeds
-  n=2^q at the bead's relevant sizes (n in [256, 16384], i.e. q in
-  [8, 14]) — so "T << n" isn't a safe assumption to exploit in general. This
-  is an order-of-magnitude argument, not a measurement; the actual solver
-  bridge that produced the H2/H4/N2 numbers cited in the bead description
-  (`chem/certkit_bridge.py`) is external to this repository and was not
-  available to check against.
-- That k=n-2 is *tight* — i.e., that there isn't a smarter algorithm/
-  adversary pairing that pushes the necessary k down, or a smarter adversary
-  that pushes it up further (it can't go above n-2 for this specific
-  discriminator-planting technique, since it needs 2 free dimensions, but a
-  different technique might need only 1, or might not be beatable by any
-  finite subspace method at all in a different sense). What's shown is a
-  valid lower bound at k=n-2, not a matching upper bound analysis.
-- Nothing about FEAST/contour-integral counting, which session 3 flagged and
-  set aside over a separate soundness objection (deterministic vs.
-  probabilistic trace estimation) — untouched this session; the objection
-  session 3 raised stands unconfirmed and unrefuted.
+This session wrote an actual Jordan-Wigner transform from scratch (Pauli
+multiplication tables, ladder operators `a_p^dagger`/`a_p` as two-term Pauli
+sums with a Z-string, term-by-term multiplication and combination — no
+numpy, no openfermion) and generated random one- and two-body
+electronic-structure-shaped Hamiltonians (real coefficients, standard
+8-fold-symmetry-shaped two-body indexing) for M = 4..18 qubits, then counted
+**distinct, non-cancelling** Pauli strings after combination (not the naive
+formula, which could in principle overcount if terms collide):
+
+```
+   M      n=2^M    T (1-body only)   T (1+2-body)        T/n
+   4         16                 17             99     6.1875
+   6         64                 37            562     8.7812
+   8        256                 65           1941     7.5820
+  10       1024                101           5036     4.9180
+  12       4096                145          10903     2.6619
+  14      16384                197          20854     1.2728
+  16      65536                257          36457     0.5563
+  18     262144                325          59536     0.2271
+```
+
+Confirms session 4's reasoning with an actual computation: T exceeds n for
+every q <= 14 — i.e. for every molecule this bead's own description cites
+(H2, H4, N2), and the crossover to T < n falls between q=14 and q=16,
+outside this bead's motivating range. This doesn't rule out term-structure
+exploitation *in general* (it becomes numerically plausible past q~16), but
+it does rule it out for the specific cases the bead exists because of.
+
+### 2. Why doesn't the existing banded/Sturm route already solve this?
+
+Nobody in sessions 1-4 asked this. `certkit.banded.count_eigenvalues_below_banded`
+(`sturm`/`sturm_be` rules) already gives O(n*b^2) counting on **any**
+`Operator`, including matrix-free `PauliSumReal` — `band_structure` reads
+rows via `op.row(i)`, which works uniformly across backends. So why is this
+bead's cliff still there?
+
+Ran `certkit.banded.band_structure` (trusted, stdlib-only, no risk to the
+soundness boundary) against the repo's own
+`examples/sample/pauli_operator.json` — an 11-qubit **nearest-neighbor**
+(physically local) TFIM-shaped Hamiltonian:
+
+```
+qubits: 11 n: 2048 num terms: 21
+actual bandwidth (unbounded probe): 1024
+default MAX_BANDWIDTH=64 rejects: operator bandwidth exceeds 64 (entry at 0,128)
+```
+
+Traced the mechanism directly against `PauliSumReal`: a single-qubit Pauli
+term (X or Y) on qubit k has bit-flip mask 2^k, so `row(0)` has its nonzero
+entry at column 2^k exactly — verified for k=0..11, giving bandwidths
+1, 2, 4, ..., 2048.
+
+**This is not a reindexing-fixable limitation.** Reordering qubits only
+chooses *which* physical qubit lands on a high bit position; it can't avoid
+having *some* qubit there. Any Hamiltonian in which every qubit carries at
+least one term (true of essentially every physically meaningful multi-qubit
+Hamiltonian — e.g. a per-orbital one-body diagonal term) guarantees that
+whichever qubit ends up on the top bit contributes bandwidth ~n/2,
+*regardless of how physically local the original problem is*.
+Computational-basis bit-flip distance is exponential in bit position; it is
+not the kind of permutation-invariant "closeness" that ordinary
+sparse-matrix bandwidth reduction (Cuthill-McKee etc.) can exploit, because
+permuting qubits permutes *which* term gets the exponential penalty, not
+whether one exists.
+
+This is the actual mechanical reason the coverage cliff exists for Pauli
+sums specifically: `DENSE_LIMIT=160` (≈ q<=7) and `MAX_BANDWIDTH=64` (≈
+q<=6, since a lone term on qubit 6 already hits exactly 64) both bite in
+almost the same place for this backend — not because the two constants were
+chosen incompatibly, but because *both* trusted O(sub-n^3) routes this repo
+has are structurally tied to n or to basis-index locality, and Pauli-sum
+matrix-free operators have neither past ~7 active qubits.
+
+### 3. FEAST/contour-integral soundness objection — resolved by computation
+
+Session 3 flagged, and session 4 left unconfirmed, a suspicion that
+matrix-free contour-integral eigenvalue counting (FEAST, Sakurai-Sugiura)
+needs stochastic trace estimation to stay matrix-free, and that this is
+categorically incompatible with this repo's *unconditional* soundness
+requirement (not "correct with high probability").
+
+Built the best possible case for the method: an **exact** idempotent
+spectral projector (rank 3, n=50, random orthonormal basis) — zero
+contour-quadrature error, only the trace-estimation step is stochastic — and
+estimated `Tr(P)` via Hutchinson probing (`{-1,+1}` random vectors), the
+only way to make contour-integral counting cheaper than O(n) resolvent
+solves. Rounded the estimate to the nearest integer over 300 seeds per probe
+count:
+
+```
+S=5 probes:  61.0% of seeds round to the wrong count (max error 4.46)
+S=10 probes: 48.3% wrong (max error 2.62)
+S=20 probes: 34.3% wrong (max error 1.68)
+S=50 probes: 12.7% wrong (max error 1.05)   -- S=50=n here, i.e. no savings left
+```
+
+Even at S=n (the point where the method has already given up its entire
+cost advantage), a nonzero fraction of seeds still round to the wrong
+integer. This confirms the objection concretely, not just plausibly:
+matrix-free contour-integral counting is irreducibly a probabilistic
+estimate for any S<n. It cannot back a certificate whose contract is "if
+VERIFIED, the true value is in the interval, unconditionally" — reporting a
+count derived this way would make VERIFIED a disguised probabilistic claim.
+The only way to make it deterministic (S=n exact probes, i.e. n resolvent
+solves) either costs as much as this bead exists to avoid, or, if each
+resolvent solve is itself matrix-free/iterative, falls under session 4's
+matvec-oracle adversary lower bound (an iterative linear solve only touches
+A through `apply()`). FEAST/contour-integral counting is closed off for
+this bead's soundness model.
+
+## Cumulative state across six sessions
+
+| Avenue | Status | Session |
+|---|---|---|
+| Plain Lanczos + block-residual counting | infeasible (needs k~n empirically) | 1 |
+| Shift-invert Lanczos | infeasible (same reason) | 2 |
+| Chebyshev-filtered subspace | infeasible (mechanism identified) | 3 |
+| Entire matvec-oracle subspace family (worst case) | **proven** infeasible for k<n-2 | 4 |
+| Low Pauli-term-count exploitation | not viable for q<=14 (computed) | 5 |
+| Banded/Sturm route on Pauli sums | structurally inapplicable past ~7 qubits (computed) | 5 |
+| FEAST/contour-integral counting | soundness-incompatible (computed) | 5 |
+| Fill-reducing sparse (non-banded) LDL^T reordering | same cubic order, constant-factor only (computed) | 6 |
+
+Every concretely-named angle across six sessions has now been closed off
+with either a proof or a direct, reproducible computation — including the
+one door session 5 flagged as the most promising untried direction. The
+two doors that remain open are: a genuinely new idea nobody here has had
+yet (session 6's closing thought below names the next candidate this
+session considered and did not attempt), or a human deciding that "every
+concretely-named angle tried failed for a stated, checked reason" is
+itself a legitimate basis to close this bead as infeasible for now
+(re-opening if a new idea shows up) rather than requiring an actual rule
+to exist. This session declines to make that call, same as sessions 4-5,
+for the same reason: the acceptance criteria is unambiguous about wanting
+a working rule, and none of the six sessions' work is that.
+
+**A genuinely new candidate, named but not attempted**: certified
+tensor-network / MPO methods (bounded-bond-dimension representations with a
+rigorous, interval-arithmetic truncation-error bound) are the standard way
+1D-local Hamiltonians get represented sub-exponentially in practice
+(DMRG and relatives), and are a structurally different idea from every
+one of the eight rows above — none of which used a compressed
+*representation* of the operator, only different ways of processing it as
+given. Flagging, not attempting: turning "DMRG with certified error bars"
+into something this repo's trust boundary would accept is itself
+open, actively-researched rigorous-numerics territory (how do you bound
+truncation error in outward-rounded interval arithmetic without the bound
+itself depending on an assumption about the state, which is exactly the
+kind of unproven-input trust this repo exists to refuse?) — plausibly
+larger in scope than this bead, not a same-session attempt.
 
 ## What I did not do, and why
 
-- **Did not implement anything in `certkit/`.** The result is a proof that
-  the obvious approach's entire family is a dead end in the worst case, not
-  a new working rule — there is nothing sound-and-useful to add yet.
-- **Did not touch `DENSE_LIMIT`, any tolerance, or any existing rule.** No
-  bound, tolerance, guard, or threshold in trusted code was touched this
-  session; nothing needed a derivation because nothing was changed.
-- **Did not pursue the Pauli-term-structure-exploiting direction
-  computationally.** It's a plausible next avenue (see above) but is a
-  substantially different kind of work (would need a genuinely new counting
-  rule reading `PauliSumReal`'s term list, not another subspace experiment)
-  and wasn't started this session, to leave room to write this up properly
-  rather than leaving a half-finished prototype.
-- **Did not revisit FEAST/contour-integral counting.** Session 3's soundness
-  objection to it is unrelated to this session's finding and remains
-  exactly where session 3 left it.
-- **Did not build a molecular-Hamiltonian fixture.** Still out of scope for
-  a bead about the counting rule; the lower-bound argument this session
-  built is a worst-case statement over all symmetric operators and doesn't
-  need one — TFIM/chemistry fixtures were sessions 1-3's tool for measuring
-  what *specific* constructions need, not for this session's proof.
+- **Did not implement anything in `certkit/`.** Same reasoning as session 4:
+  the results here are further evidence that the searched space is a dead
+  end, not a new working rule.
+- **Did not touch `DENSE_LIMIT`, `MAX_BANDWIDTH`, any tolerance, or any
+  existing rule.** Nothing needed a derivation because nothing changed.
+- **Did not make the "is the lower bound enough to close this" judgment
+  call.** Explicitly left to a human by session 4; nothing this session
+  found changes that answer, so it stays left to a human.
+- **Did not pursue "exploit low term count" computationally for q>=16.**
+  It's now the one door left slightly ajar (T<n there), but q>=16 means
+  n>=65536, which is well past the bead's cited motivating molecules and
+  would need its own justification for why anyone needs a certificate at
+  that scale before it's worth building.
+- **Did not implement anything in `certkit/` this session either.** Same
+  reasoning as sessions 4-5: the fill-reducing-order result is further
+  evidence the searched space is a dead end, not a new working rule; there
+  is nothing to wire into `banded.py` or the checker.
+- **Did not attempt an exact worst-case proof that no separator of `Q_q`
+  beats `C(q, q//2)`.** Result 1 above is a constructive upper bound (a
+  specific cut that provably works, verified computationally) plus the
+  standard hypercube vertex-isoperimetric fact (Harper) that Hamming-layer
+  cuts are asymptotically optimal for this graph — used as the reason to
+  trust the shrinkage rate, not re-derived from scratch. If a future
+  session wants a from-first-principles worst-case bound rather than a
+  well-known-and-computationally-checked one, that gap is here. Did not
+  pursue it because Result 2's direct measurement already gives a
+  same-conclusion, harder-to-argue-with number (an actual heuristic
+  solver's output, not just a bound on what's possible).
+- **Did not push the minimum-degree experiment past q=12 / M=11
+  (n=4096/2048).** `ops/n^3` had already visibly converged to a stable
+  constant over three doublings in each case (see the tables) with no
+  downward trend, and greedy min-degree's O(n * max_deg^2) cost was
+  starting to bite the time budget (max_deg ≈ 0.4-0.5n makes each further
+  doubling roughly 8x slower). Larger n would not have changed the
+  conclusion, only cost more wall-clock to reconfirm it.
+- **Did not attempt certified tensor-network/MPO methods.** Named above as
+  the one structurally-new remaining candidate; flagged, not started — see
+  the "genuinely new candidate" paragraph above for why.
+- **Did not pursue q>=16 term-structure exploitation further.** Session 5's
+  finding stands (T<n only past q~16, outside the bead's cited motivating
+  range); this session found nothing that changes that.
+- **Did not build a molecular-Hamiltonian (H2/H4/N2) fixture.** Same as
+  session 5 — the JW-shaped experiments use synthetic random one/two-body
+  Hamiltonians of the right *shape*, sufficient for the scaling questions
+  asked; an actual chemistry solver bridge remains outside this repo.
 
 ## What I could not verify
 
-- Whether Pauli-term-structure-exploiting methods could beat this bound —
-  open question, not resolved either way.
-- The T (term count) vs. n scaling claim for real chemistry Hamiltonians —
-  reasoned analytically (O(q^4) vs. n=2^q), not checked against actual
-  data, since the bridge that produced this bead's H2/H4/N2 numbers lives
-  outside this repository.
-- Whether k=n-2 is the true minimum necessary k, or whether a different
-  adversary construction could push the necessary k lower (making the
-  bound tighter and thus a *stronger* obstruction) or whether some
-  algorithm could get away with less against a weaker adversary in a
-  practically-relevant sense (the bound is worst-case, not average-case;
-  sessions 1-3's TFIM measurements are the average/typical-case evidence,
-  and they also needed k close to n, so the two lines of evidence agree,
-  but I did not prove the worst case and typical case must coincide).
+- Whether `C(q, q//2)` is the *provably minimum* balanced vertex separator
+  of `Q_q`, versus merely the best known/standard construction — relied on
+  the well-established hypercube vertex-isoperimetric result rather than
+  re-deriving optimality from scratch. Does not affect Result 2's
+  conclusion, since that result is a direct measurement, not dependent on
+  Result 1's optimality.
+- Whether a fundamentally different (non-elimination-based) exploitation of
+  Pauli-sum sparsity structure exists — only that the two natural
+  elimination-order strategies (banded, and now general fill-reducing) both
+  fail for the same underlying reason (the sparsity graph's separators
+  don't shrink fast enough).
+- Whether certified tensor-network/MPO methods are buildable within this
+  repo's soundness model at all — named as the next candidate, not
+  evaluated.
+- Whether q>=16 term-structure exploitation is *actually* buildable into a
+  working rule, only that T<n becomes true there — necessary, not
+  sufficient (carried over from session 5, unchanged this session).
 
 ## Test suite / trust boundary
 
 ```
 $ uv sync --extra dev
-Resolved 20 packages in 0.77ms
-Checked 8 packages in 0.60ms
+ + certkit==0.1.0 (from file:///workspace)
+ + numpy==2.5.2, scipy==1.18.1 ... (20 packages total)
 $ uv run pytest tests
-============================= 165 passed in 26.20s =============================
+============================= 165 passed in 23.26s =============================
 ```
 
-No-dependency checker run (numpy/scipy blocked via `sys.meta_path`, inside
-the same interpreter — the mechanism `tests/test_trust_boundary.py` itself
-uses — running `certkit.cli check` on the checked-in sample
-certificate/operator):
+No system `python3` exists in this container outside a uv-managed venv
+(same as sessions 4-5's environment). Followed the established fallback:
+block numpy/scipy via `sys.meta_path` in a subprocess (`uv run --no-project
+python3`, `PYTHONPATH=/workspace`), then run the checker exactly as
+`certkit.cli check` would, against the repo's sample certificate/operator:
 
 ```
 VERIFIED  lambda_min_enclosure via temple_inertia  [-3.095316431033709, -3.0953164248430762]
   re-derived: [-3.0953164279384016, -3.095316427938384]
 ```
 
+Unchanged from sessions 4-5's reconfirmation, as expected since no trusted
+code changed this session either.
+
 ## Working tree
 
 ```
 $ git status --short
- M README.md
  M issues.jsonl
- M sandbox-handoffs/certkit-ph1.md
- M sandbox-prompt.md
-?? sandbox-handoffs/certkit-gvg.md
-?? sandbox-handoffs/certkit-j82.md
-?? sandbox-handoffs/certkit-ph1-adaptive-adversary-experiment.py
-?? sandbox-handoffs/certkit-ph1-chebyshev-experiment.py
-?? sandbox-handoffs/certkit-ph1-lowerbound-experiment.py
-?? sandbox-handoffs/certkit-ph1-scaling-sweep.py
-?? sandbox-handoffs/certkit-sqr.md
-?? tests/exact_oracle.py
-?? tests/test_exact_oracle.py
+?? sandbox-handoffs/certkit-ph1-bandwidth-check-experiment.py
+?? sandbox-handoffs/certkit-ph1-feast-soundness-experiment.py
+?? sandbox-handoffs/certkit-ph1-fillreducing-experiment.py
+?? sandbox-handoffs/certkit-ph1-jw-termcount-experiment.py
+ M sandbox-handoffs/certkit-ph1.md   (this file)
 ```
 
-The `README.md`/`sandbox-prompt.md` diffs and the
-`certkit-gvg.md`/`certkit-j82.md`/`certkit-sqr.md`/`tests/exact_oracle.py`/
-`tests/test_exact_oracle.py` additions pre-existed when this session started
-(present in `git status` before any tool use this session) — they belong to
-other, already-closed beads, not to this session. Not mine to touch or
-explain further. `sandbox-handoffs/certkit-ph1-chebyshev-experiment.py` and
-`certkit-ph1-scaling-sweep.py` are session 3's scratch scripts, also
-pre-existing and left unchanged.
-
-This session added two new scratch files, both under the gitignored
-`sandbox-handoffs/` directory: `certkit-ph1-lowerbound-experiment.py`
-(non-adaptive lower bound) and `certkit-ph1-adaptive-adversary-experiment.py`
-(adaptive lower bound, the main result). `issues.jsonl` is modified because
-`bd export -o issues.jsonl` was run after updating this bead's notes (see
-below).
+The three `bandwidth-check`/`feast-soundness`/`jw-termcount` scripts and the
+`issues.jsonl`/handoff modifications are session 5's uncommitted work,
+left as found (git policy is no commits regardless of which session
+produced the diff). This session added exactly one new file
+(`certkit-ph1-fillreducing-experiment.py`) and further edits to this
+handoff and to `issues.jsonl` (re-exported after updating the bead's
+notes). Nothing under `certkit/`, `tests/`, or `examples/` changed.
 
 ## Suggested next commands (none run — git policy)
 
 ```
-git status   # to see the pre-existing, unrelated diffs from other beads
-```
-
-Nothing from this bead needs a commit under `certkit/`, `tests/`, or
-`examples/` — no trusted or tested code changed. If a human wants the
-updated bead notes and this handoff committed:
-
-```
-git add sandbox-handoffs/certkit-ph1.md sandbox-handoffs/certkit-ph1-lowerbound-experiment.py sandbox-handoffs/certkit-ph1-adaptive-adversary-experiment.py issues.jsonl
-git commit -m "certkit-ph1: adversarial matvec-oracle lower bound (session 4)"
+git add sandbox-handoffs/certkit-ph1.md \
+        sandbox-handoffs/certkit-ph1-jw-termcount-experiment.py \
+        sandbox-handoffs/certkit-ph1-bandwidth-check-experiment.py \
+        sandbox-handoffs/certkit-ph1-feast-soundness-experiment.py \
+        sandbox-handoffs/certkit-ph1-fillreducing-experiment.py \
+        issues.jsonl
+git commit -m "certkit-ph1: close off term-count, banded-route, FEAST, and fill-reducing-order angles (sessions 5-6)"
 ```
 
 ## bd state
 
 `certkit-ph1` is claimed and left **open**, with `--notes` summarizing this
-session's adversarial lower-bound result. `bd export -o issues.jsonl` was
-run since the notes changed meaningfully. Recommended next steps, in
-priority order:
+session's result. `bd export -o issues.jsonl` was run since the notes
+changed meaningfully. Recommended next steps, in priority order:
 
-1. Decide whether this lower bound is enough to close the bead as
-   "shown infeasible for the matvec-oracle-based subspace family" (a
-   judgment call about whether the acceptance criterion's intent extends to
-   "we now know why, and it's provably not this family" or strictly
-   requires a working rule to exist) — this session leaves that call to a
-   human/future session rather than making it unilaterally, since closing
-   without a working counting rule would be a norm change to what "closed"
-   means for this bead, not something to decide alone.
-2. If continuing to search for a working rule: the one door this session's
-   bound leaves open is a rule that reads Pauli-sum term structure directly
-   (number/pattern of terms in `H = sum_t c_t P_t`) rather than treating the
-   operator as an opaque matvec oracle — untried by any of the four
-   sessions so far. Start by checking whether real chemistry term counts
-   (from the external `chem/certkit_bridge.py` solver, not in this repo)
-   actually satisfy T << n at the bead's relevant sizes; this session's
-   O(q^4)-vs-2^q argument suggests they likely don't, which would close off
-   this direction too, but that argument was not checked against real data.
-3. Separately, session 3's FEAST/contour-integral soundness objection
-   (stochastic trace estimation vs. this repo's unconditional-soundness
-   requirement) remains unconfirmed and unrefuted — worth resolving with a
-   concrete derivation before anyone prototypes it.
-4. Unrelated to this bead: the pure-Python interval LDL^T behind
-   `DENSE_LIMIT=160` could in principle be sped up to raise that threshold a
-   few x (flagged by session 3). Does not satisfy this bead's "without
-   O(n^3)" criterion; would need its own bead.
+1. The human judgment call sessions 4, 5, and 6 have all declined: whether
+   "every concretely-named angle tried fails for a stated, checked reason"
+   (now eight rows in the cumulative-state table, spanning four empirical
+   constructions, one proven worst-case impossibility covering an entire
+   query-model family, and three further computed closures) is itself
+   enough to close this bead as infeasible-for-now, versus requiring a
+   working rule to exist per the literal acceptance criteria. Still
+   outstanding, and arguably more pressing now that the two directions
+   session 5 left open (fill-reducing order, q>=16 term-count) are down to
+   one.
+2. If continuing to search for a working rule: certified tensor-network/MPO
+   methods (bounded bond dimension with an interval-arithmetic-bounded
+   truncation error) are the one structurally-new candidate this session
+   identified and did not attempt — flagged above as plausibly
+   larger in scope than this bead on its own.
+3. Separately, revisit whether q>=16 Pauli-term-count exploitation is worth
+   pursuing given it's outside the bead's originally-cited motivating range
+   (H2/H4/N2, all q<=12) — may be a case for scoping this bead down or
+   splitting off a "large-q" variant rather than pursuing it as-is. Carried
+   over from session 5, unchanged.
