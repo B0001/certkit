@@ -46,12 +46,6 @@ volumes = [
     "claude-certkit-lake:/workspace/lean/.lake",
 ]
 
-# The claude-certkit-lake volume is shared by every worker, so two concurrent
-# Lean beads would build into it at once and fight over lake traces -- the same
-# host-vs-worker problem the volume fixes, now worker-vs-worker. Serialise until
-# the .lake sharing is per-worker. (default is 25)
-max-workers = 1
-
 [tool.sandbox.env]
 # The Lean toolchain lives in the claude-elan volume, but elan puts its PATH
 # line in ~/.bashrc -- which is in the container's ephemeral layer and is wiped
