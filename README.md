@@ -506,6 +506,17 @@ milestone in itself, and the interval-arithmetic layer is the one after that.
   a pivot to a sign. They remain the only option above bandwidth 1.
 - `DENSE_LIMIT = 160` — interval LDLᵀ is cubic in pure Python, so above that the
   tight route declines rather than running for an hour.
+- **Large matrix-free Pauli-sum operators past `DENSE_LIMIT` have no
+  Temple-quality route.** The inertia route needs the dense O(n³) LDLᵀ; the
+  banded route needs bounded bandwidth, which a Pauli sum never has (a single
+  term on qubit *k* puts a nonzero at column 2ᵏ). That leaves Gershgorin,
+  whose width grows with the operator — 100–1600× chemical accuracy on
+  H4/N2-scale Hamiltonians. Six investigation sessions (`certkit-ph1`,
+  `sandbox-handoffs/certkit-ph1.md`) ruled out every matrix-free counting
+  rule proposed: the whole matvec-oracle family by an adversarial lower
+  bound, and term-count / FEAST / fill-reducing LDLᵀ by direct computation.
+  Every enclosure certkit does return stays sound; this is a coverage
+  ceiling, not a soundness gap.
 - Gershgorin is weak on operators with large off-diagonal mass. It is a floor,
   not a good bound.
 
