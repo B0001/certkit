@@ -46,6 +46,12 @@ volumes = [
     "claude-certkit-lake:/workspace/lean/.lake",
 ]
 
+# Per-run dispatch cap (default 25), not a concurrency limit -- the loop is
+# already serial. A short leash so a run stops for human review instead of
+# churning the whole queue. Counts dispatches, so a bead that comes back
+# unfinished burns more than one; MAX_ATTEMPTS parks it after 2 retries.
+max-workers = 5
+
 [tool.sandbox.env]
 # The Lean toolchain lives in the claude-elan volume, but elan puts its PATH
 # line in ~/.bashrc -- which is in the container's ephemeral layer and is wiped
