@@ -2,13 +2,13 @@
   certkit -- soundness obligations, stated in Lean 4 / mathlib4.
 
   STATUS: compiles clean against the pinned mathlib (see lake-manifest.json).
-  Five of the seven theorems below are real, zero-`sorry` proofs:
+  Six of the seven theorems below are real, zero-`sorry` proofs:
   `rayleigh_ritz_min`, `inertia_count_below`, `gershgorin_lower`,
-  `temple_lower`, and `sweep_backward_bound` (that last one has its own doc
-  comment on exactly what it does and does not cover). The other two --
-  `residual_encloses_some_eigenvalue` and `weyl_shift` -- are still `sorry`:
-  a specification of intent, not a verified artifact. Do not read this file
-  as "soundness-complete."
+  `temple_lower`, `weyl_shift`, and `sweep_backward_bound` (that last one has
+  its own doc comment on exactly what it does and does not cover). Only
+  `residual_encloses_some_eigenvalue` is still `sorry`: a specification of
+  intent, not a verified artifact. Do not read this file as
+  "soundness-complete."
 
   The point of the file is the correspondence. The Python checker performs
   exactly two mathematical steps, and each is one theorem here:
@@ -27,9 +27,11 @@
 -/
 
 import Mathlib.Analysis.InnerProductSpace.Spectrum
+import Mathlib.Analysis.InnerProductSpace.PiL2
 import Mathlib.LinearAlgebra.Matrix.Hermitian
 import Mathlib.Analysis.Matrix.Spectrum
 import Mathlib.Analysis.Matrix.PosDef
+import Mathlib.Analysis.CStarAlgebra.Matrix
 import Mathlib.Algebra.Order.Star.Real
 import Certkit.BackwardError
 
@@ -372,7 +374,205 @@ theorem gershgorin_lower :
           ciInf_le (Set.Finite.bddBelow (Set.finite_range _)) k
       _ ≤ hA.eigenvalues i := hk'
 
-open scoped Matrix.Norms.L2Operator in
+open scoped RealInnerProductSpace
+
+section CourantFischer
+
+/-!
+Self-contained Courant-Fischer / Loewner-monotonicity development used to
+prove `weyl_shift` below. Worked out and verified in mathlib commit
+`5ba95124681110751345e9bd360994de8541027c` (2026-08-28) under bead
+certkit-8y2.6, after four sessions confirming mathlib has no Weyl
+eigenvalue-perturbation inequality, Courant-Fischer min-max
+characterisation, or comparable variational eigenvalue result under any
+name (`Mathlib.Analysis.InnerProductSpace.Spectrum` has only the
+*extreme*-eigenvalue facts `hasEigenvalue_iSup_of_finiteDimensional` /
+`hasEigenvalue_iInf_of_finiteDimensional`, no indexed statement;
+`Mathlib.Analysis.InnerProductSpace.Rayleigh` has only the unindexed
+`norm_eq_iSup_rayleighQuotient`). Everything from here to `weyl_shift`
+is derived from mathlib primitives -- no numeric constant is transcribed
+and no step is asserted without proof.
+-/
+
+variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
+variable {k : ℕ} {T TWeyl : E →ₗ[ℝ] E}
+
+private lemma weyl_inf_ne_bot_of_finrank_lt (s t : Submodule ℝ E)
+    (h : Module.finrank ℝ E < Module.finrank ℝ ↥s + Module.finrank ℝ ↥t) :
+    s ⊓ t ≠ ⊥ := by
+  intro hbot
+  have h1 : Module.finrank ℝ ↥(s ⊔ t) + Module.finrank ℝ ↥(s ⊓ t)
+      = Module.finrank ℝ ↥s + Module.finrank ℝ ↥t := Submodule.finrank_sup_add_finrank_inf_eq s t
+  rw [hbot] at h1
+  simp at h1
+  have h2 : Module.finrank ℝ ↥(s ⊔ t) ≤ Module.finrank ℝ E := Submodule.finrank_le _
+  omega
+
+private lemma weyl_finrank_span_Iio_image [DecidableEq E] {b : Fin k → E} (hb : Orthonormal ℝ b)
+    (i₀ : Fin k) :
+    Module.finrank ℝ (Submodule.span ℝ ((Finset.Iio i₀).image b : Set E)) = i₀.val := by
+  rw [Module.finrank_eq_card_basis (OrthonormalBasis.span hb (Finset.Iio i₀)).toBasis]
+  rw [Fintype.card_coe, Fin.card_Iio]
+
+private lemma weyl_finrank_span_Iic_image [DecidableEq E] {b : Fin k → E} (hb : Orthonormal ℝ b)
+    (i₀ : Fin k) :
+    Module.finrank ℝ (Submodule.span ℝ ((Finset.Iic i₀).image b : Set E)) = i₀.val + 1 := by
+  rw [Module.finrank_eq_card_basis (OrthonormalBasis.span hb (Finset.Iic i₀)).toBasis]
+  rw [Fintype.card_coe, Fin.card_Iic]
+
+/-- Hard direction of Courant-Fischer: any subspace of dimension `i₀.val + 1`
+contains a nonzero vector whose Rayleigh quotient is at most `eigenvalues i₀`. -/
+private theorem weyl_courant_fischer_le (hT : T.IsSymmetric) (hk : Module.finrank ℝ E = k)
+    (V : Submodule ℝ E) (i₀ : Fin k) (hV : Module.finrank ℝ V = i₀.val + 1) :
+    ∃ x ∈ V, x ≠ 0 ∧ ⟪x, T x⟫ ≤ hT.eigenvalues hk i₀ * ⟪x, x⟫ := by
+  classical
+  set b := hT.eigenvectorBasis hk with hb_def
+  have hb_orth : Orthonormal ℝ b := b.orthonormal
+  set U : Submodule ℝ E := Submodule.span ℝ ((Finset.Iio i₀).image b : Set E) with hU_def
+  have hUfin : Module.finrank ℝ U = i₀.val := weyl_finrank_span_Iio_image hb_orth i₀
+  have hWfin : Module.finrank ℝ Uᗮ = k - i₀.val := by
+    have hadd := U.finrank_add_finrank_orthogonal
+    rw [hk, hUfin] at hadd
+    omega
+  have hpigeon : V ⊓ Uᗮ ≠ ⊥ := by
+    apply weyl_inf_ne_bot_of_finrank_lt
+    rw [hV, hWfin, hk]
+    have : i₀.val < k := i₀.isLt
+    omega
+  obtain ⟨x, hxmem, hxne⟩ := Submodule.ne_bot_iff _ |>.mp hpigeon
+  obtain ⟨hxV, hxW⟩ := Submodule.mem_inf.mp hxmem
+  refine ⟨x, hxV, hxne, ?_⟩
+  have hbTb : ∀ j, T (b j) = hT.eigenvalues hk j • b j := hT.apply_eigenvectorBasis hk
+  have hzero : ∀ j, j < i₀ → ⟪b j, x⟫ = 0 := by
+    intro j hj
+    have hbjU : b j ∈ U :=
+      Submodule.subset_span (Finset.mem_coe.mpr (Finset.mem_image_of_mem b (Finset.mem_Iio.mpr hj)))
+    exact Submodule.inner_right_of_mem_orthogonal hbjU hxW
+  have hxx : ⟪x, x⟫ = ∑ j, ⟪b j, x⟫ ^ 2 := by
+    rw [← b.sum_inner_mul_inner x x]
+    congr 1
+    funext j
+    rw [real_inner_comm x (b j), sq]
+  have hxTx : ⟪x, T x⟫ = ∑ j, hT.eigenvalues hk j * ⟪b j, x⟫ ^ 2 := by
+    rw [← b.sum_inner_mul_inner x (T x)]
+    congr 1
+    funext j
+    have hsymm : ⟪b j, T x⟫ = ⟪T (b j), x⟫ := (hT (b j) x).symm
+    rw [real_inner_comm (b j) x, hsymm, hbTb j, real_inner_smul_left, sq]
+    ring
+  rw [hxTx, hxx, Finset.mul_sum]
+  apply Finset.sum_le_sum
+  intro j _
+  rcases lt_or_ge j i₀ with hlt | hge
+  · rw [hzero j hlt]; simp
+  · have hantitone : hT.eigenvalues hk j ≤ hT.eigenvalues hk i₀ :=
+      hT.eigenvalues_antitone hk hge
+    nlinarith [sq_nonneg (⟪b j, x⟫)]
+
+/-- Easy direction of Courant-Fischer: any vector in the span of the top
+`i₀.val + 1` eigenvectors has Rayleigh quotient at least `eigenvalues i₀`. -/
+private theorem weyl_courant_fischer_ge (hT : T.IsSymmetric) (hk : Module.finrank ℝ E = k)
+    (i₀ : Fin k) (x : E)
+    (hx : x ∈ Submodule.span ℝ (hT.eigenvectorBasis hk '' (↑(Finset.Iic i₀) : Set (Fin k)))) :
+    hT.eigenvalues hk i₀ * ⟪x, x⟫ ≤ ⟪x, T x⟫ := by
+  set b := hT.eigenvectorBasis hk with hb_def
+  have hbTb : ∀ j, T (b j) = hT.eigenvalues hk j • b j := hT.apply_eigenvectorBasis hk
+  have hxmem : x ∈ Submodule.span ℝ (b.toBasis '' (↑(Finset.Iic i₀) : Set (Fin k))) := by
+    rwa [OrthonormalBasis.coe_toBasis]
+  have hsupp : ↑(b.toBasis.repr x).support ⊆ (↑(Finset.Iic i₀) : Set (Fin k)) :=
+    b.toBasis.mem_span_image.mp hxmem
+  have hzero : ∀ j, i₀ < j → ⟪b j, x⟫ = 0 := by
+    intro j hj
+    have hjnotin : j ∉ Finset.Iic i₀ := by simp [Finset.mem_Iic, not_le.mpr hj]
+    have : (b.toBasis.repr x) j = 0 := by
+      by_contra hne
+      exact hjnotin (hsupp (Finsupp.mem_support_iff.mpr hne))
+    rw [OrthonormalBasis.coe_toBasis_repr_apply] at this
+    rw [← b.repr_apply_apply x j]
+    exact this
+  have hxx : ⟪x, x⟫ = ∑ j, ⟪b j, x⟫ ^ 2 := by
+    rw [← b.sum_inner_mul_inner x x]
+    congr 1
+    funext j
+    rw [real_inner_comm x (b j), sq]
+  have hxTx : ⟪x, T x⟫ = ∑ j, hT.eigenvalues hk j * ⟪b j, x⟫ ^ 2 := by
+    rw [← b.sum_inner_mul_inner x (T x)]
+    congr 1
+    funext j
+    have hsymm : ⟪b j, T x⟫ = ⟪T (b j), x⟫ := (hT (b j) x).symm
+    rw [real_inner_comm (b j) x, hsymm, hbTb j, real_inner_smul_left, sq]
+    ring
+  rw [hxTx, hxx, Finset.mul_sum]
+  apply Finset.sum_le_sum
+  intro j _
+  rcases lt_or_ge i₀ j with hlt | hge
+  · rw [hzero j hlt]; simp
+  · have hantitone : hT.eigenvalues hk i₀ ≤ hT.eigenvalues hk j :=
+      hT.eigenvalues_antitone hk hge
+    nlinarith [sq_nonneg (⟪b j, x⟫)]
+
+/-- Shifted one-sided Loewner comparison: if `T - TWeyl` is bounded above by
+`c • 1` (in Rayleigh-quotient form), every `T`-eigenvalue is at most the
+corresponding `TWeyl`-eigenvalue plus `c`, at the same index. -/
+private theorem weyl_eigenvalues_sub_le (hT : T.IsSymmetric) (hTW : TWeyl.IsSymmetric)
+    (hk : Module.finrank ℝ E = k) (c : ℝ)
+    (hbound : ∀ x, ⟪x, (T - TWeyl) x⟫ ≤ c * ⟪x, x⟫) (i₀ : Fin k) :
+    hT.eigenvalues hk i₀ ≤ hTW.eigenvalues hk i₀ + c := by
+  classical
+  set bT := hT.eigenvectorBasis hk with hbT_def
+  set V : Submodule ℝ E := Submodule.span ℝ ((Finset.Iic i₀).image bT : Set E) with hV_def
+  have hVfin : Module.finrank ℝ V = i₀.val + 1 := weyl_finrank_span_Iic_image bT.orthonormal i₀
+  obtain ⟨x, hxV, hxne, hxleTW⟩ := weyl_courant_fischer_le hTW hk V i₀ hVfin
+  have hxV' : x ∈ Submodule.span ℝ (bT '' (↑(Finset.Iic i₀) : Set (Fin k))) := by
+    rw [hV_def, Finset.coe_image] at hxV; exact hxV
+  have hxgeT : hT.eigenvalues hk i₀ * ⟪x, x⟫ ≤ ⟪x, T x⟫ := weyl_courant_fischer_ge hT hk i₀ x hxV'
+  have hxx_pos : 0 < ⟪x, x⟫ := real_inner_self_pos.mpr hxne
+  have hbound_x : ⟪x, T x⟫ ≤ ⟪x, TWeyl x⟫ + c * ⟪x, x⟫ := by
+    have h := hbound x
+    rw [LinearMap.sub_apply, inner_sub_right] at h
+    linarith
+  have hchain : hT.eigenvalues hk i₀ * ⟪x, x⟫ ≤ (hTW.eigenvalues hk i₀ + c) * ⟪x, x⟫ := by
+    rw [add_mul]
+    linarith [hxgeT, hxleTW, hbound_x]
+  exact le_of_mul_le_mul_right hchain hxx_pos
+
+/-- Abstract Weyl shift: if `T - TWeyl`'s Rayleigh quotient is bounded in
+absolute value by `c * ⟪x,x⟫`, every eigenvalue moves by at most `c`. -/
+private theorem weyl_shift_abstract (hT : T.IsSymmetric) (hTW : TWeyl.IsSymmetric)
+    (hk : Module.finrank ℝ E = k) (c : ℝ)
+    (hbound : ∀ x, |⟪x, (T - TWeyl) x⟫| ≤ c * ⟪x, x⟫) (i₀ : Fin k) :
+    |hT.eigenvalues hk i₀ - hTW.eigenvalues hk i₀| ≤ c := by
+  rw [abs_le]
+  refine ⟨?_, ?_⟩
+  · have h := weyl_eigenvalues_sub_le hTW hT hk c (fun x => by
+      have h1 := (abs_le.mp (hbound x)).1
+      have h2 : ⟪x, (TWeyl - T) x⟫ = -⟪x, (T - TWeyl) x⟫ := by
+        rw [LinearMap.sub_apply, LinearMap.sub_apply, inner_sub_right, inner_sub_right]; ring
+      rw [h2]; linarith)
+    linarith [h i₀]
+  · have h := weyl_eigenvalues_sub_le hT hTW hk c (fun x => (abs_le.mp (hbound x)).2)
+    linarith [h i₀]
+
+end CourantFischer
+
+open scoped Matrix.Norms.L2Operator
+
+/-- Cauchy-Schwarz + operator-norm sandwich: the Rayleigh quotient of a real
+matrix `M` (via `toEuclideanLin`) is bounded in absolute value by
+`‖M‖ * ⟪x,x⟫`, where `‖M‖` is the `L²` operator norm. -/
+private lemma weyl_abs_inner_toEuclideanLin_le (M : Matrix n n ℝ) (x : EuclideanSpace ℝ n) :
+    |⟪x, Matrix.toEuclideanLin M x⟫| ≤ ‖M‖ * ⟪x, x⟫ := by
+  have h1 : |⟪x, Matrix.toEuclideanLin M x⟫| ≤ ‖x‖ * ‖Matrix.toEuclideanLin M x‖ :=
+    abs_real_inner_le_norm x (Matrix.toEuclideanLin M x)
+  have h2 : ‖Matrix.toEuclideanLin M x‖ ≤ ‖M‖ * ‖x‖ := by
+    rw [← Matrix.l2_opNorm_toEuclideanCLM M]
+    exact (Matrix.toEuclideanCLM (n := n) (𝕜 := ℝ) M).le_opNorm x
+  have h3 : ⟪x, x⟫ = ‖x‖ * ‖x‖ := real_inner_self_eq_norm_mul_norm x
+  calc |⟪x, Matrix.toEuclideanLin M x⟫| ≤ ‖x‖ * ‖Matrix.toEuclideanLin M x‖ := h1
+    _ ≤ ‖x‖ * (‖M‖ * ‖x‖) := by gcongr
+    _ = ‖M‖ * (‖x‖ * ‖x‖) := by ring
+    _ = ‖M‖ * ⟪x, x⟫ := by rw [h3]
+
 /-- **Weyl.** Perturbing a symmetric operator moves each eigenvalue by at most
     the norm of the perturbation. This is what carries the backward-error
     counting rule's conclusion back from the nearby matrix the float sweep
@@ -385,168 +585,40 @@ open scoped Matrix.Norms.L2Operator in
     `‖·‖` here is the `L²` operator norm (`Matrix.Norms.L2Operator`, the norm
     induced by identifying a matrix with the continuous linear map it gives on
     `EuclideanSpace` -- the classical spectral norm Weyl's inequality is stated
-    against), opened locally so this file does not choose a global `Norm`
-    instance for `Matrix n n ℝ`. It is *not* the entrywise/row-sum bound
-    `sturm_be` actually computes at runtime; relating the two remains part of
-    the open obligation this theorem's `sorry` stands for.
+    against). It is *not* the entrywise/row-sum bound `sturm_be` actually
+    computes at runtime; relating the two remains a separate obligation,
+    covered by `sweep_backward_bound`'s doc comment below, not by this
+    theorem.
 
-    Checked across four independent sessions now: mathlib has no Weyl
-    eigenvalue-perturbation inequality, Courant-Fischer min-max
-    characterisation, or comparable variational eigenvalue result under any
-    name (`grep -rl weyl|courant|minimax` across `Mathlib/` turns up nothing
-    on point, confirmed again this session against mathlib commit
-    `5ba95124681110751345e9bd360994de8541027c`, 2026-08-28).
-    `Mathlib.Analysis.InnerProductSpace.Spectrum` (where
-    `LinearMap.IsSymmetric.eigenvalues`, the thing `eigenvalues₀` above is
-    literally built from) has only the *extreme*-eigenvalue variational facts
-    -- `hasEigenvalue_iSup_of_finiteDimensional`,
-    `hasEigenvalue_iInf_of_finiteDimensional` -- and no indexed
-    Courant-Fischer statement; `Mathlib.Analysis.InnerProductSpace.Rayleigh`
-    likewise gives only `norm_eq_iSup_rayleighQuotient` (operator norm as a
-    sup over *all* vectors) and nothing about a single indexed eigenvalue.
-    An equivalent-difficulty route -- prove Loewner-order monotonicity
-    (`A ⪯ B → ∀ k, eigenvalues₀ A k ≤ eigenvalues₀ B k`, which composed with
-    `‖A-B‖•1 - (A-B)` being `PosSemidef` would give this theorem in a few
-    lines) -- needs exactly the same missing content: that monotonicity
-    claim *is* Weyl's monotonicity theorem, itself normally proved via
-    Courant-Fischer or Cauchy interlacing.
-
-    This session (2026-08-31, split into its own bead certkit-8y2.6) built
-    and *verified compiling* (zero `sorry`, `lake env lean` clean) the "hard
-    direction" of Courant-Fischer at the abstract `LinearMap.IsSymmetric` /
-    `InnerProductSpace ℝ E` level, in a scratch file (not integrated here --
-    see below for why). Reproduce by pasting into a throwaway
-    `Certkit/Scratch.lean` and running `lake env lean Certkit/Scratch.lean`:
-
-    ```
-    import Mathlib.Analysis.InnerProductSpace.Spectrum
-    import Mathlib.Analysis.InnerProductSpace.PiL2
-
-    open scoped Matrix RealInnerProductSpace
-
-    variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
-    variable {n : ℕ} {T : E →ₗ[ℝ] E}
-
-    private lemma inf_ne_bot_of_finrank_lt (s t : Submodule ℝ E)
-        (h : Module.finrank ℝ E < Module.finrank ℝ ↥s + Module.finrank ℝ ↥t) :
-        s ⊓ t ≠ ⊥ := by
-      intro hbot
-      have h1 : Module.finrank ℝ ↥(s ⊔ t) + Module.finrank ℝ ↥(s ⊓ t)
-          = Module.finrank ℝ ↥s + Module.finrank ℝ ↥t := Submodule.finrank_sup_add_finrank_inf_eq s t
-      rw [hbot] at h1
-      simp at h1
-      have h2 : Module.finrank ℝ ↥(s ⊔ t) ≤ Module.finrank ℝ E := Submodule.finrank_le _
-      omega
-
-    private lemma finrank_span_Iio_image [DecidableEq E] {b : Fin n → E} (hb : Orthonormal ℝ b)
-        (i₀ : Fin n) :
-        Module.finrank ℝ (Submodule.span ℝ ((Finset.Iio i₀).image b : Set E)) = i₀.val := by
-      rw [Module.finrank_eq_card_basis (OrthonormalBasis.span hb (Finset.Iio i₀)).toBasis]
-      rw [Fintype.card_coe, Fin.card_Iio]
-
-    /-- Hard direction of Courant-Fischer: any subspace of dimension `i₀.val + 1`
-    contains a nonzero vector whose Rayleigh quotient is at most `eigenvalues i₀`. -/
-    theorem courant_fischer_le (hT : T.IsSymmetric) (hn : Module.finrank ℝ E = n)
-        (V : Submodule ℝ E) (i₀ : Fin n) (hV : Module.finrank ℝ V = i₀.val + 1) :
-        ∃ x ∈ V, x ≠ 0 ∧ ⟪x, T x⟫ ≤ hT.eigenvalues hn i₀ * ⟪x, x⟫ := by
-      classical
-      set b := hT.eigenvectorBasis hn with hb_def
-      have hb_orth : Orthonormal ℝ b := b.orthonormal
-      set U : Submodule ℝ E := Submodule.span ℝ ((Finset.Iio i₀).image b : Set E) with hU_def
-      have hUfin : Module.finrank ℝ U = i₀.val := finrank_span_Iio_image hb_orth i₀
-      have hWfin : Module.finrank ℝ Uᗮ = n - i₀.val := by
-        have hadd := U.finrank_add_finrank_orthogonal
-        rw [hn, hUfin] at hadd
-        omega
-      have hpigeon : V ⊓ Uᗮ ≠ ⊥ := by
-        apply inf_ne_bot_of_finrank_lt
-        rw [hV, hWfin, hn]
-        have : i₀.val < n := i₀.isLt
-        omega
-      obtain ⟨x, hxmem, hxne⟩ := Submodule.ne_bot_iff _ |>.mp hpigeon
-      obtain ⟨hxV, hxW⟩ := Submodule.mem_inf.mp hxmem
-      refine ⟨x, hxV, hxne, ?_⟩
-      have hbTb : ∀ j, T (b j) = hT.eigenvalues hn j • b j := hT.apply_eigenvectorBasis hn
-      have hzero : ∀ j, j < i₀ → ⟪b j, x⟫ = 0 := by
-        intro j hj
-        have hbjU : b j ∈ U :=
-          Submodule.subset_span (Finset.mem_coe.mpr (Finset.mem_image_of_mem b (Finset.mem_Iio.mpr hj)))
-        exact Submodule.inner_right_of_mem_orthogonal hbjU hxW
-      have hxx : ⟪x, x⟫ = ∑ j, ⟪b j, x⟫ ^ 2 := by
-        rw [← b.sum_inner_mul_inner x x]
-        congr 1
-        funext j
-        rw [real_inner_comm x (b j), sq]
-      have hxTx : ⟪x, T x⟫ = ∑ j, hT.eigenvalues hn j * ⟪b j, x⟫ ^ 2 := by
-        rw [← b.sum_inner_mul_inner x (T x)]
-        congr 1
-        funext j
-        have hsymm : ⟪b j, T x⟫ = ⟪T (b j), x⟫ := (hT (b j) x).symm
-        rw [real_inner_comm (b j) x, hsymm, hbTb j, real_inner_smul_left, sq]
-        ring
-      rw [hxTx, hxx, Finset.mul_sum]
-      apply Finset.sum_le_sum
-      intro j _
-      rcases lt_or_ge j i₀ with hlt | hge
-      · rw [hzero j hlt]; simp
-      · have hantitone : hT.eigenvalues hn j ≤ hT.eigenvalues hn i₀ :=
-          hT.eigenvalues_antitone hn hge
-        nlinarith [sq_nonneg (⟪b j, x⟫)]
-    ```
-
-    Not integrated into this file because it does not by itself discharge
-    `weyl_shift`: three more pieces stand between it and the theorem below,
-    none attempted yet, roughly increasing in expected difficulty.
-
-    1. **Easy direction** (companion lemma, expected tractable): for `x` in
-       the span of the *top* `i₀.val + 1` eigenvectors `b 0 .. b i₀`,
-       `eigenvalues i₀ * ⟪x,x⟫ ≤ ⟪x,T x⟫`. Same Parseval expansion as
-       `courant_fischer_le`'s proof above, but needs "`x ∈ span (b '' s)` ⟹
-       `⟪b k, x⟫ = 0` for `k ∉ s`" as a side fact -- not found ready-made in
-       `Mathlib.Analysis.InnerProductSpace.{PiL2,Orthogonal}` (searched this
-       session); doable directly from `Submodule.mem_span_finset` plus
-       `Orthonormal`'s pairwise-orthogonality, not yet written.
-
-    2. **Loewner monotonicity**: combine both directions to get, for
-       symmetric `T_A, T_B` on the same `E` with `T_A - T_B` positive
-       semidefinite, `eigenvalues_B i₀ ≤ eigenvalues_A i₀` for every `i₀`.
-       Sketch (standard): apply `courant_fischer_le` to `T_A` at
-       `V = span (B's top i₀+1 eigenvectors)` to get `x* ∈ V`,
-       `⟪x*,T_A x*⟫ ≤ eigenvalues_A i₀ * ⟪x*,x*⟫`; combine with
-       `⟪x*,T_B x*⟫ ≤ ⟪x*,T_A x*⟫` (positive semidefiniteness of
-       `T_A - T_B`) and the easy direction applied to `T_B` at the same `x*`
-       (`eigenvalues_B i₀ * ⟪x*,x*⟫ ≤ ⟪x*,T_B x*⟫`) to chain the inequality
-       through. Not yet written; depends on (1).
-
-    3. **Bridge to `Matrix.IsHermitian`**: `weyl_shift` is stated over
-       `Matrix n n ℝ` / `hA.eigenvalues : n → ℝ`, not the abstract
-       `LinearMap.IsSymmetric.eigenvalues` used above. Whether these two
-       eigenvalue functions provably agree under `Matrix.toEuclideanLin` (or
-       the `PiLp`/`EuclideanSpace n ℝ` identification `Mathlib.Analysis.
-       Matrix.Spectrum` actually uses to define `Matrix.IsHermitian.
-       eigenvalues` in the first place) was **not checked this session** --
-       genuinely unknown difficulty, could be a short `simp`-able
-       coincidence-of-definitions lemma or its own multi-step project.
-
-    4. **Operator-norm sandwich**: even granting 1-3, `weyl_shift`'s stated
-       form is the *shift* inequality (`|λ_i(A) - λ_i(B)| ≤ ‖A-B‖`), not raw
-       Loewner monotonicity. Getting from one to the other needs
-       `B - t•1 ⪯ A ⪯ B + t•1` for `t = ‖A-B‖`, i.e. that the `L²` operator
-       norm of a Hermitian matrix bounds every eigenvalue in absolute value
-       -- another fact not located in mathlib this session (only
-       `norm_eq_iSup_rayleighQuotient`, an unindexed sup-over-all-vectors
-       statement, was found; connecting it to a single indexed eigenvalue's
-       absolute value is itself unproven work).
-
-    Given three prior sessions' conclusion that this is a self-contained
-    formalisation project and this session's own experience -- a genuinely
-    new, verified result on step 0, with three more steps of unassessed
-    (2-3) to unknown (3-4, possibly the largest) size still ahead -- this
-    remains correctly scoped as its own bead rather than a session-sized
-    lemma. Left `sorry`. -/
+    Proved from mathlib primitives via the `CourantFischer` section above:
+    Courant-Fischer min-max (both directions) at the abstract
+    `LinearMap.IsSymmetric` level, specialised to `T := A.toEuclideanLin` /
+    `TWeyl := B.toEuclideanLin` (the bridge from `Matrix.IsHermitian.
+    eigenvalues` to the abstract `LinearMap.IsSymmetric.eigenvalues` is
+    definitional -- `rfl` -- via `Matrix.isSymmetric_toEuclideanLin_iff` and
+    `finrank_euclideanSpace`, exactly how `Matrix.IsHermitian.eigenvalues₀`
+    itself is defined in `Mathlib.Analysis.Matrix.Spectrum`), combined with
+    the Cauchy-Schwarz/operator-norm sandwich
+    `weyl_abs_inner_toEuclideanLin_le` above. No numeric constant is
+    transcribed; every step is a mathlib lemma application. -/
 theorem weyl_shift {B : Matrix n n ℝ} (hB : B.IsHermitian) (i : n) :
     |hA.eigenvalues i - hB.eigenvalues i| ≤ ‖A - B‖ := by
-  sorry
+  have hTA : (Matrix.toEuclideanLin A).IsSymmetric := Matrix.isSymmetric_toEuclideanLin_iff.mpr hA
+  have hTB : (Matrix.toEuclideanLin B).IsSymmetric := Matrix.isSymmetric_toEuclideanLin_iff.mpr hB
+  have hbound : ∀ x : EuclideanSpace ℝ n,
+      |⟪x, (Matrix.toEuclideanLin A - Matrix.toEuclideanLin B) x⟫| ≤ ‖A - B‖ * ⟪x, x⟫ := by
+    intro x
+    have hsub : Matrix.toEuclideanLin A - Matrix.toEuclideanLin B
+        = Matrix.toEuclideanLin (A - B) := (map_sub Matrix.toEuclideanLin A B).symm
+    rw [hsub]
+    exact weyl_abs_inner_toEuclideanLin_le (A - B) x
+  have hw := weyl_shift_abstract hTA hTB finrank_euclideanSpace ‖A - B‖ hbound
+      ((Fintype.equivOfCardEq (Fintype.card_fin (Fintype.card n))).symm i)
+  have heqA : hTA.eigenvalues finrank_euclideanSpace
+      ((Fintype.equivOfCardEq (Fintype.card_fin (Fintype.card n))).symm i) = hA.eigenvalues i := rfl
+  have heqB : hTB.eigenvalues finrank_euclideanSpace
+      ((Fintype.equivOfCardEq (Fintype.card_fin (Fintype.card n))).symm i) = hB.eigenvalues i := rfl
+  rwa [heqA, heqB] at hw
 
 /-- **The per-step rounding collection**, formalised and proved in
     `Certkit.BackwardError` (`sweep_step_backward_bound`): given the
