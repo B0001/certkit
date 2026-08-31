@@ -34,6 +34,24 @@ asks for a working counting rule to exist, and nothing found this session
 
 Not met this session, same as sessions 1-5. Nothing below is a working rule.
 
+> **Superseded in part by session 7 (bead `certkit-cpo`) — read "Session 7"
+> below before relying on anything in this section or in "Session 6".** Session
+> 7 widened the sweep to 6 orderings x 8 families and upheld the *asymptotic*
+> conclusion (nothing is sub-cubic; min-degree is provably the exact optimum
+> wherever the optimum is computable). But it overturned two things stated
+> above:
+>
+> 1. **Session 6's "13x-38x versus dense" constants are inflated by exactly 3x.**
+>    The `sum of pivot-degree^2` proxy evaluated on a *dense* graph is `n^3/3`,
+>    not `n^3`. The real figures are ~4x-13x. See Result 2.
+> 2. **The criterion above conflates two different questions.** "Without an
+>    `O(n^3)` dense factorisation" is asymptotic; "Temple-quality width at >= 256
+>    dimensions" is coverage. They have *different answers*. Min-degree-ordered
+>    interval LDL^T returns a sound `count = 1` at **n = 256 and n = 512** on a
+>    real Pauli-sum operator, and at n=256 the natural order **abstains** where
+>    min-degree succeeds. `DENSE_LIMIT = 160` is a **runtime cap, not a soundness
+>    cap**. See Result 9.
+
 ## Session 6: fill-reducing sparse LDL^T — closed off (computed)
 
 One scratch, numpy-free prototype,
@@ -142,6 +160,703 @@ potentially favorable.
 
 This closes off the one concretely-named door left open after session 5.
 See "Cumulative state" below for the complete list.
+
+# Session 7 (bead `certkit-cpo`): the fill-reducing sweep, widened — closed off again, but with one live correction to session 6
+
+Session 6 measured **one** ordering (greedy min-degree) on **two** graphs and
+concluded the fill-reducing direction was closed. Bead `certkit-cpo` was filed
+to check that conclusion against the acceptance criterion's actual demand — at
+least 3 orderings x 4 families over >= 3 doublings of `n` — because a
+one-ordering, two-graph result is not that.
+
+**The widened sweep confirms session 6's asymptotic conclusion and refutes one
+of its framings.** Six orderings x eight families x q=8..12 (5 doublings, 240
+cells, all complete) plus q=6..12 (7 points) for the ambiguous cells: nothing is
+sub-cubic. But session 6's closing sentence — "does not meet the acceptance
+criterion's 'without an O(n^3) dense factorisation' bar" — conflated the
+*asymptotic* question with the *coverage* question the bead actually asks, and a
+direct interval-LDL^T measurement this session shows the two answers differ. See
+Result 9.
+
+All code is scratch, numpy-free, stdlib-only, under
+`sandbox-handoffs/certkit-cpo`.
+**Nothing under `certkit/`, `tests/`, or `examples/` changed.**
+
+## What was measured vs. what was argued
+
+Measured: symbolic elimination ops (`sum of pivot-degree^2`) and fill edges for
+every (ordering, family, q) cell; component counts by GF(2) rank, cross-checked
+against BFS; exact all-orderings optima by subset DP at n<=16; interval-LDL^T
+pivot widths and inertia counts at n=256 and n=512.
+
+Argued (not measured): that the fitted exponents extrapolate past q=14; that
+`C(q, q//2)` is the *optimal* balanced separator of `Q_q` (session 6's carried-over
+gap, still open); that the ~1.11 exponent on `q` converges to 1.
+
+## Result 1 — the sweep, and what it covers
+
+`run_sweep.py`, 6 orderings x 8 families x q=8..12 = 240 cells, **240 complete,
+none partial or timed out**. Orderings: `natural` (lex), `rcm`, `nested_dissection`,
+`amd`, `spectral`, `min_degree`. Families: `hypercube_tfim`, `chain_1d_nn`,
+`lattice_2d`, `all_to_all`, `jw_one_body`, `jw_two_body`, `bravyi_kitaev`,
+`random_k_local`. That is 2x the orderings and 2x the families the acceptance
+criterion asks for, over 5 doublings rather than 3. The ambiguous cells were
+extended to q=6..12 (`amb.json`), and RCM on the hypercube to **q=14** (`_law_ext.json`).
+
+The sweep's ordering axis is 6, but the adversarial pass added 6 more —
+`popcount_asc` (Hamming-weight-layered), `middle_last`, `gray`, `bitrev`,
+`nested_bisect`, min-fill, and a middle-layer hybrid. **None is sub-cubic either.**
+The honest phrasing of the headline is therefore *"no cell in the 6x8 sweep, nor
+any of the additional orderings tested in the adversarial pass, is sub-cubic"* —
+not "all orderings", which the sweep cannot support.
+
+## Result 2 — methodological correction: session 6's baseline was wrong twice
+
+Session 6 reported `ops/n^3` against a literal dense `n^3` and read "13x-38x
+reduction". Both halves of that are wrong, in opposite directions, and both need
+stating before any number below is read.
+
+**(a) The dense baseline is off by exactly 3x.** The experiment's own proxy
+(`sum of pivot-degree^2`), evaluated on a *dense* graph, is
+`sum_k (n-1-k)^2 = n^3/3 - n^2/2 + n/6`, not `n^3`. Measured
+(`_meth_sectors.py`, part C):
+
+```
+  n= 4096:  n^3 = 68719476736   sum(n-1-k)^2 = 22898104320   ratio = 0.33321
+```
+
+So `ops/n^3 = 0.026` is `0.078` of *same-proxy* dense — a 12.8x win, not 38x.
+Every "Nx under dense" constant session 6 quoted, and the one `analyze.py`
+prints, must be divided by 3.
+
+**(b) Six of the eight families have a disconnected sparsity graph, and
+comparing them to a single dense factorisation hands the ordering a free
+factor.** The mask sets of `chain_1d_nn`, `lattice_2d`, `all_to_all`,
+`jw_one_body`, `jw_two_body`, `bravyi_kitaev` span only the even-weight subgroup
+of `Z_2^q`, so the Cayley graph has exactly **c = 2** connected components
+(physically: the fermion-parity superselection sectors). Elimination never
+creates an edge between components, so the honest baseline is
+*dense-factorising each sector*, `c * (n/c)^3`, not `n^3`.
+
+Verified rather than assumed (`_meth_sectors.py`):
+
+- components of a Cayley graph on `Z_2^q` are cosets of the GF(2) span, hence
+  always equal size. BFS size histograms for all 8 families at q=4..11 confirm a
+  single size class in every case ("128x2", "1024x2", "256x1", ...). No family
+  breaks the equal-sector assumption.
+- additivity holds exactly: `ops_full == sum over independently-factorised
+  sectors` in **30/30** checked (family, ordering, q) cells, across 5 orderings.
+  E.g. `chain_1d_nn q=8 amd: 121688 == 121688`; `jw_two_body q=9 rcm:
+  10670640 == 10670640`.
+
+So every headline below is reported **both** as `ops/n^3` and as
+`ops/sector = ops * c^2 / n^3`, and the honest fraction-of-dense is
+`3 * ops/sector`.
+
+This is a correction to how session 6 would have read these numbers, not a new
+finding — session 6 only measured two families, one of which (`hypercube_tfim`)
+happens to have c=1, so the issue never surfaced.
+
+## Result 3 — the full fitted-exponent table, with confidence intervals
+
+`analyze.py` and `_meth_fit.py`, q=8..12 (5 points), OLS on `log ops` vs `log n`,
+95% CI from the residual standard error. **These are presented as intervals, not
+verdicts**, for a reason given immediately after.
+
+```
+          ordering           family   c   alpha      se        95% CI       3.00?  2.85?
+--------------------------------------------------------------------------------------
+               amd       all_to_all   2   3.003   0.007  [2.980, 3.026]     yes     no
+               amd    bravyi_kitaev   2   3.003   0.007  [2.980, 3.026]     yes     no
+               amd      chain_1d_nn   2   2.969   0.012  [2.932, 3.007]     yes     no
+               amd   hypercube_tfim   1   2.992   0.002  [2.985, 3.000]      no     no
+               amd      jw_one_body   2   3.003   0.007  [2.980, 3.026]     yes     no
+               amd      jw_two_body   2   3.004   0.001  [2.999, 3.008]     yes     no
+               amd       lattice_2d   2   2.931   0.056  [2.753, 3.109]     yes    yes
+               amd   random_k_local   1   2.896   0.080  [2.642, 3.149]     yes    yes
+        min_degree       all_to_all   2   3.008   0.014  [2.962, 3.054]     yes     no
+        min_degree    bravyi_kitaev   2   3.008   0.014  [2.962, 3.054]     yes     no
+        min_degree      chain_1d_nn   2   2.989   0.020  [2.924, 3.053]     yes     no
+        min_degree   hypercube_tfim   1   3.002   0.014  [2.956, 3.048]     yes     no
+        min_degree      jw_one_body   2   3.008   0.014  [2.962, 3.054]     yes     no
+        min_degree      jw_two_body   2   3.003   0.001  [3.000, 3.007]     yes     no
+        min_degree       lattice_2d   2   2.920   0.036  [2.806, 3.034]     yes    yes
+        min_degree   random_k_local   1   2.912   0.091  [2.623, 3.202]     yes    yes
+           natural       all_to_all   2   3.000   0.000  [3.000, 3.000]     yes     no
+           natural    bravyi_kitaev   2   3.002   0.007  [2.981, 3.023]     yes     no
+           natural      chain_1d_nn   2   3.000   0.000  [3.000, 3.000]     yes     no
+           natural   hypercube_tfim   1   3.000   0.000  [3.000, 3.000]     yes     no
+           natural      jw_one_body   2   3.000   0.000  [3.000, 3.000]     yes     no
+           natural      jw_two_body   2   3.000   0.000  [3.000, 3.001]     yes     no
+           natural       lattice_2d   2   2.931   0.108  [2.587, 3.274]     yes    yes
+           natural   random_k_local   1   2.993   0.013  [2.953, 3.033]     yes     no
+ nested_dissection       all_to_all   2   2.878   0.007  [2.856, 2.899]      no     no
+ nested_dissection    bravyi_kitaev   2   2.871   0.010  [2.839, 2.902]      no    yes
+ nested_dissection      chain_1d_nn   2   2.554   0.104  [2.224, 2.884]      no    yes   <- ambiguous
+ nested_dissection   hypercube_tfim   1   2.844   0.177  [2.279, 3.408]     yes    yes   <- ambiguous
+ nested_dissection      jw_one_body   2   2.878   0.007  [2.856, 2.899]      no     no
+ nested_dissection      jw_two_body   2   2.987   0.006  [2.969, 3.005]     yes     no
+ nested_dissection       lattice_2d   2   2.916   0.217  [2.224, 3.607]     yes    yes
+ nested_dissection   random_k_local   1   2.940   0.017  [2.888, 2.993]      no     no
+               rcm       all_to_all   2   2.858   0.002  [2.851, 2.865]      no     no
+               rcm    bravyi_kitaev   2   2.859   0.002  [2.853, 2.866]      no     no
+               rcm      chain_1d_nn   2   2.818   0.007  [2.796, 2.840]      no     no   <- ambiguous
+               rcm   hypercube_tfim   1   2.837   0.006  [2.818, 2.855]      no    yes   <- ambiguous
+               rcm      jw_one_body   2   2.858   0.002  [2.851, 2.865]      no     no
+               rcm      jw_two_body   2   2.986   0.004  [2.973, 2.999]      no     no
+               rcm       lattice_2d   2   2.887   0.143  [2.431, 3.343]     yes    yes
+               rcm   random_k_local   1   2.919   0.091  [2.628, 3.209]     yes    yes
+          spectral       all_to_all   2   3.000   0.000  [3.000, 3.000]     yes     no
+          spectral    bravyi_kitaev   2   3.002   0.007  [2.981, 3.023]     yes     no
+          spectral      chain_1d_nn   2   3.000   0.000  [3.000, 3.000]     yes     no
+          spectral   hypercube_tfim   1   2.988   0.047  [2.838, 3.138]     yes    yes
+          spectral      jw_one_body   2   3.000   0.000  [3.000, 3.000]     yes     no
+          spectral      jw_two_body   2   3.000   0.000  [3.000, 3.001]     yes     no
+          spectral       lattice_2d   2   2.931   0.108  [2.587, 3.274]     yes    yes
+          spectral   random_k_local   1   2.963   0.085  [2.691, 3.234]     yes    yes
+```
+
+Minimum over all 48: **2.554**. Pre-registered rule required `alpha < 2.5` to
+claim a sub-cubic subclass. No cell reaches it.
+
+**Three honest caveats on this table, all from the adversarial pass:**
+
+1. **The 2.85 "CUBIC vs ambiguous" cut is not a neutral boundary.** Fitting an
+   *exact* `n^3/log2(n)` law over q=8..12 with this same fitter gives
+   `alpha = 2.8541`, 95% CI `[2.8380, 2.8701]` (`_meth_fit.py` part D). So the
+   threshold sits on the polylog control. RCM's cells (2.818-2.859) are
+   statistically **indistinguishable from an exact polylog law**. That is
+   *evidence for* the polylog reading of Result 6, not evidence of ambiguity —
+   but it means the hard `CUBIC`/`ambiguous` labels `analyze.py` prints should be
+   read as "distinguishable from `n^3/log n`?" and nothing more.
+2. **12/48 cells' 95% CI contains both 3.00 and 2.85**, and **9/48 verdicts flip
+   under leave-one-out**. Median CI halfwidth is 0.0228, so 35/48 cells *can*
+   resolve a 0.15 gap; the 13 that cannot are concentrated in `lattice_2d`,
+   `random_k_local`, and `nested_dissection x hypercube` — exactly the cells
+   already flagged ambiguous. A blanket "5 points can't fit an exponent" would be
+   wrong; a blanket "all 48 exponents are pinned down" would also be wrong.
+3. **A low fit cannot be blamed on lower-order terms.** The exact-cubic control
+   `K_n` (`ops = n^3/3 - n^2/2 + n/6` exactly) fits `alpha = 3.0019`,
+   CI `[3.0006, 3.0033]` — *above* 3. Lower-order corrections bias this fitter
+   **upward**, not downward. So a fit at 2.84 needs a real polylog factor to
+   explain it.
+
+**And a correction to "all 48":** only **36 distinct ops-vectors** exist among
+the 48 cells. `spectral` reproduces `natural`'s ops exactly in 31/40 (family, q)
+cells; `amd` reproduces `min_degree` in 25/40. The effective evidence is 36
+independent cells, not 48.
+
+## Result 4 — the explicit outcome-(b) statement, with numbers
+
+The acceptance criterion's outcome (b) requires the write-up to state, with
+numbers, that all tested orderings converge to a constant `ops/n^3` (or to the
+polylog law) for all tested families. Here it is, `ops/n^3` and `ops/sector` at
+q=8 (n=256) and q=12 (n=4096), plus the honest fraction of same-proxy dense-per-
+sector (`3 * ops/sector`):
+
+```
+ordering           family           c   ops/n^3         ops/sector      frac. of dense
+                                        q=8      q=12   q=8      q=12   q=8    q=12
+------------------------------------------------------------------------------------
+amd                all_to_all       2  0.05289 0.05267 0.21155 0.21069  0.635  0.632
+amd                bravyi_kitaev    2  0.05289 0.05267 0.21155 0.21069  0.635  0.632
+amd                chain_1d_nn      2  0.00725 0.00659 0.02901 0.02636  0.087  0.079
+amd                hypercube_tfim   1  0.02693 0.02634 0.02693 0.02634  0.081  0.079
+amd                jw_one_body      2  0.05289 0.05267 0.21155 0.21069  0.635  0.632
+amd                jw_two_body      2  0.07973 0.08071 0.31892 0.32282  0.957  0.968
+amd                lattice_2d       2  0.00934 0.00836 0.03737 0.03346  0.112  0.100
+amd                random_k_local   1  0.19231 0.13668 0.19231 0.13668  0.577  0.410
+min_degree         all_to_all       2  0.05289 0.05267 0.21155 0.21069  0.635  0.632
+min_degree         bravyi_kitaev    2  0.05289 0.05267 0.21155 0.21069  0.635  0.632
+min_degree         chain_1d_nn      2  0.00725 0.00704 0.02901 0.02816  0.087  0.084
+min_degree         hypercube_tfim   1  0.02693 0.02634 0.02693 0.02634  0.081  0.079
+min_degree         jw_one_body      2  0.05289 0.05267 0.21155 0.21069  0.635  0.632
+min_degree         jw_two_body      2  0.07973 0.08058 0.31892 0.32233  0.957  0.967
+min_degree         lattice_2d       2  0.00890 0.00752 0.03560 0.03007  0.107  0.090
+min_degree         random_k_local   1  0.19216 0.13613 0.19216 0.13613  0.576  0.408
+natural            all_to_all       2  0.06333 0.06331 0.25330 0.25323  0.760  0.760
+natural            bravyi_kitaev    2  0.06534 0.06526 0.26135 0.26104  0.784  0.783
+natural            chain_1d_nn      2  0.03402 0.03401 0.13607 0.13605  0.408  0.408
+natural            hypercube_tfim   1  0.13606 0.13605 0.13606 0.13605  0.408  0.408
+natural            jw_one_body      2  0.06333 0.06331 0.25330 0.25323  0.760  0.760
+natural            jw_two_body      2  0.08064 0.08076 0.32254 0.32303  0.968  0.969
+natural            lattice_2d       2  0.05556 0.05557 0.22225 0.22228  0.667  0.667
+natural            random_k_local   1  0.25335 0.25069 0.25335 0.25069  0.760  0.752
+nested_dissection  all_to_all       2  0.04889 0.03462 0.19556 0.13846  0.587  0.415
+nested_dissection  bravyi_kitaev    2  0.05037 0.03465 0.20149 0.13858  0.604  0.416
+nested_dissection  chain_1d_nn      2  0.01566 0.00469 0.06265 0.01878  0.188  0.056
+nested_dissection  hypercube_tfim   1  0.03616 0.03245 0.03616 0.03245  0.108  0.097
+nested_dissection  jw_one_body      2  0.04889 0.03462 0.19556 0.13846  0.587  0.415
+nested_dissection  jw_two_body      2  0.07926 0.07629 0.31702 0.30516  0.951  0.915
+nested_dissection  lattice_2d       2  0.01338 0.01464 0.05352 0.05856  0.161  0.176
+nested_dissection  random_k_local   1  0.04893 0.04082 0.04893 0.04082  0.147  0.122
+rcm                all_to_all       2  0.04866 0.03287 0.19465 0.13148  0.584  0.394
+rcm                bravyi_kitaev    2  0.04866 0.03298 0.19465 0.13191  0.584  0.396
+rcm                chain_1d_nn      2  0.01519 0.00915 0.06075 0.03662  0.182  0.110
+rcm                hypercube_tfim   1  0.05236 0.03325 0.05236 0.03325  0.157  0.100
+rcm                jw_one_body      2  0.04866 0.03287 0.19465 0.13148  0.584  0.394
+rcm                jw_two_body      2  0.07973 0.07645 0.31892 0.30582  0.957  0.917
+rcm                lattice_2d       2  0.02109 0.01923 0.08436 0.07690  0.253  0.231
+rcm                random_k_local   1  0.14283 0.13703 0.14283 0.13703  0.428  0.411
+spectral           all_to_all       2  0.06333 0.06331 0.25330 0.25323  0.760  0.760
+spectral           bravyi_kitaev    2  0.06534 0.06526 0.26135 0.26104  0.784  0.783
+spectral           chain_1d_nn      2  0.03402 0.03401 0.13607 0.13605  0.408  0.408
+spectral           hypercube_tfim   1  0.07649 0.08066 0.07649 0.08066  0.229  0.242
+spectral           jw_one_body      2  0.06333 0.06331 0.25330 0.25323  0.760  0.760
+spectral           jw_two_body      2  0.08064 0.08076 0.32254 0.32303  0.968  0.969
+spectral           lattice_2d       2  0.05556 0.05557 0.22225 0.22228  0.667  0.667
+spectral           random_k_local   1  0.26933 0.25069 0.26933 0.25069  0.808  0.752
+```
+
+**The statement outcome (b) requires:** across 5 doublings of `n`, every tested
+ordering on every tested family either holds `ops/n^3` **constant** (worst case
+`natural x jw_two_body`, 0.08064 -> 0.08076, a +0.15% change over 5 doublings;
+`min_degree x hypercube`, 0.02693 -> 0.02634, -2.2%; `amd x all_to_all`, 0.05289
+-> 0.05267, -0.4%) or **follows the `1/q` polylog law of Result 6** (RCM and
+nested dissection, the only two orderings whose `ops/n^3` is still visibly
+falling). No ordering-family pair shows `ops/n^3` decaying like a power of `n`.
+The best constant in the whole sweep is `min_degree/amd x hypercube_tfim` at
+`ops/sector = 0.0263`, i.e. **0.079 of same-proxy dense-per-sector, a 12.7x
+constant-factor win** — not 38x, and not a change in growth order.
+
+Extending `min_degree` on the hypercube past the sweep confirms the constant does
+not resume falling: `ops/n^3` over q=6..12 is 0.03311, 0.02901, 0.02693, 0.02656,
+0.02641, **0.02816**, 0.02634 — it went *up* at q=11. Local exponents over the
+same range: 2.809, 2.893, 2.980, 2.992, 3.093, 2.904. Converged to ~0.0264, flat.
+
+## Result 5 — the four "ambiguous" cells are artifacts, for two different reasons
+
+Only 4 of 48 cells fitted in the 2.55-2.85 band. Both are disposed of by the
+*local* exponent (consecutive-pair fits over q=6..12, `amb.json`), which the
+global 5-point fit hides:
+
+- **RCM**: local exponent rises **monotonically** — 2.785, 2.809, 2.829, 2.846 —
+  toward 3. The low global fit is pre-asymptotic. Extended to q=14 this session,
+  it keeps rising: 2.8609, 2.8732, 2.8836.
+- **Nested dissection**: local exponent **oscillates** — 2.337, 3.197, 1.824,
+  2.903 (chain); 3.300, 1.853, 2.897, 3.794 (hypercube). The low global fit
+  depends on where the oscillation happens to start and end. An independent check
+  found ND's `ops/n^3` on the hypercube is oscillating-constant over q=6..12, not
+  decreasing. Its CI, `[2.279, 3.408]`, says the same thing.
+
+## Result 6 — RCM follows a polylog law on the hypercube; the law is *not* `0.4 n^3/log2 n`
+
+Session 6's separator argument predicted at best a polylog improvement. RCM
+delivers exactly that — but the specific form the first draft of this write-up
+claimed ("`ops ~ 0.4 * n^3 / log2(n)`, flat to within 8%") is **quantitatively
+wrong on three counts**, and the corrected version is below.
+
+New data (q=13, q=14 run this session; q<=12 reproduces `amb.json` exactly):
+
+```
+  q       n              ops    ops/n^3  ops*q/n^3
+  6      64            18802   0.071724   0.430344
+  7     128           127408   0.060753   0.425270
+  8     256           878427   0.052358   0.418867
+  9     512          6154660   0.045856   0.412702
+ 10    1024         43734442   0.040731   0.407309
+ 11    2048        314527288   0.036616   0.402774
+ 12    4096       2285015698   0.033251   0.399016
+ 13    8192      16742547480   0.030455   0.395909   (fill=10835592 max_deg=1912  165s)
+ 14   16384     123561768948   0.028095   0.393326   (fill=41721292 max_deg=3628 3194s)
+```
+
+**(a) `ops*q/n^3` is not flat.** It is strictly monotone decreasing over all 9
+points, spanning 8.6% over 8 doublings, still falling. Fitting
+`ops*q/n^3 = A q^-s` gives `s = 0.11112 +/- 0.00238` — **46.6 standard errors
+from `s = 0`**. That is a systematic trend, not scatter.
+
+**(b) The exponent on `q` is 1.11, not 1.** Head-to-head fits over q=6..14, `C`
+free in log space (`_law_fit.py hypercube_tfim`):
+
+```
+                 model            C   RMSlogres  maxreldev      AICc  extra
+              A  C*n^3    0.0424108     0.30137     69.12%      9.95
+            B  C*n^3/q     0.409315     0.03019      5.14%    -31.46
+      D  C*n^3/sqrt(q)     0.131755     0.16576     33.34%     -0.81
+          H  C*n^3/q^2      3.95037     0.24109     39.39%      5.93
+          C  C*n^3/q^p     0.526583     0.00171      0.27%    -78.33  p=1.1111
+        E  C*n^(3-eps)     0.135147     0.03577      6.38%    -23.61  alpha=2.8328
+        F  C*n^3/(q+a)     0.370324     0.00477      0.87%    -59.88  a=-0.8818
+    G  C*n^3*(1+b/q)/q     0.365411     0.00398      0.78%    -63.13  b=1.1215
+```
+
+`n^3/q^1.1111` beats pure `n^3/q` by **17x in RMS log-residual**. Out of sample
+(fit q=6..13, predict q=14; actual `123561768948`):
+
+```
+               A  C*n^3  pred = 196378000387   err = +58.93%
+             B  C*n^3/q  pred = 129226678440   err =  +4.58%
+       D  C*n^3/sqrt(q)  pred = 159302469248   err = +28.93%
+           C  C*n^3/q^p  pred = 123291436646   err =  -0.22%
+         E  C*n^(3-eps)  pred = 113698705775   err =  -7.98%
+         F  C*n^3/(q+a)  pred = 124365204361   err =  +0.65%
+      G  C*n^3(1+b/q)/q  pred = 124154917254   err =  +0.48%
+```
+
+`n^3/q`'s error is one-signed and **growing**: +2.93, +3.54, +3.98, +4.28, +4.47,
++4.58% for predicted q=9..14.
+
+**(c) The "consecutive ratio tracks `q/(q+1)`" claim is backwards.** `q/(q+1)` is
+**high on 7 of 7** consecutive steps, by +0.79% to +1.53%. A one-signed bias on
+every step refutes the exponent; it does not confirm the law. `(q/(q+1))^1.1124`
+has both-signed residuals within +/-0.16% on 6 of 7.
+
+**(d) The constant `0.4` is not a fitted constant of any law.** It is the value
+of a still-declining sequence near q=12. The least-squares constant for pure
+`n^3/q` over q=6..14 is 0.409315 (5.14% max deviation); for the winning law it is
+0.526583 (attached to `q^1.1111`, not comparable); the asymptotic constant implied
+by `C n^3 (1+b/q)/q` is 0.365411. Quote one of those, never a bare "0.4".
+
+**Corrected statement:** over the measured window q=6..14, RCM on the hypercube
+follows `ops = 0.5266 * n^3 / q^1.1111` (RMS log-residual 0.00171, max deviation
+0.27%, out-of-sample -0.22% at q=14). The exponent on `q` appears to be
+converging to 1 from above — local values peak at 1.1259 (q 8->9) then decline
+steadily 1.1249, 1.1175, 1.1077, 1.0977, 1.0883 — so "`n^3/q` with a positive
+lower-order correction" is the honest reading. The two-parameter model
+`C n^3 (1+1.1215/q)/q` captures this and is only 2.3x worse in RMS than the
+free-exponent model; the free-exponent model wins by 15.2 AICc but its own `p` is
+drifting. **These two laws are not cleanly separated by the data.** This is the
+one place in the whole bead where two candidate laws are genuinely close.
+
+**(e) A pure power law was NOT refutable at q<=12.** Over q=6..12 alone,
+`C n^(3-eps)` fitted marginally *better* than `n^3/q` (RMS 0.02428 vs 0.02602).
+Only q=13 and q=14 separate them: the power law predicts -7.01% and -7.98%, both
+one-signed and worsening. Anyone reading the q<=12 data alone could not have
+distinguished "polylog" from "plain `n^2.82`".
+
+**(f) The law is hypercube-specific.** It does *not* generalise:
+
+- `all_to_all` (RCM, q=6..13): `ops*q/n^3` is **non-monotone** — 0.3522, 0.3780,
+  0.3893, 0.3944, 0.3965, 0.3960, 0.3944. Best law is a pure power law
+  `ops = 0.1053 n^2.8603` (RMS 0.00694 vs 0.03793 for `n^3/q`); the fitted
+  `q`-exponent is 0.878, **below 1**.
+- `jw_two_body` (RCM, q=6..13): `n^3/q` is off by **-27.65%** out of sample at
+  q=13. Best law is essentially plain cubic (`C n^3`, C=0.0782, or `n^2.9869`).
+  **RCM buys no polylog at all here.**
+
+**(g) Why the `1/q` exists, structurally** (`_law_structure.py`). RCM's pivot
+order on `Q_q` is *exactly decreasing Hamming weight* — verified q=4..12, both
+that the pivot weights are monotone non-increasing and that an independently
+constructed decreasing-Hamming-weight permutation reproduces `ops` **to the
+digit** (q=12: 2285015698 both ways). So the elimination front is the
+Hamming-layer boundary, of relative size `C(q,q/2)/2^q ~ sqrt(2/(pi q))`;
+squaring it gives the `1/q`. Measured `max_deg/n`: 0.2412 (q=12), 0.2334 (q=13),
+0.2214 (q=14) against `C(q,q/2)/2^q` = 0.2256, 0.2095, 0.2095. This is not a
+heuristic artifact — it is a computable, explainable quantity, exactly the
+polylog session 6's separator argument predicted.
+
+## Result 7 — the 8 named families are 6 distinct graphs at composite q, 5 at prime q
+
+The family axis is weaker evidence than its size suggests. Measured
+(`_meth_degeneracy.py`, `_law_chain.py`):
+
+- **`jw_one_body` is literally identical to `all_to_all` as a generator set.**
+  JW's `a_p^dag a_q` gives mask `(1<<p)|(1<<q)` for every pair. Checked at every
+  q=4..12: `identical_list = True`, `as_sets = True`, e.g. `q=12: jw=66 masks,
+  a2a=66 masks`.
+- **`bravyi_kitaev` is JW composed with an invertible GF(2) relabelling.**
+  Verified: `beta*beta^-1 == I`, `beta(JW masks) == BK masks`, and the vertex map
+  `v -> beta(v)` is a **graph isomorphism** (checked q=4,6,8,10,12).
+  **Correction:** isomorphism forces the *optimal* ordering cost to be equal, not
+  a label-reading heuristic's. Measured `bk/jw` ops ratio is 1.0000 for AMD at
+  every q (label-invariant), but up to 1.0334 for `natural`/`spectral`, 1.0303
+  for nested dissection, 1.0033 for RCM — identical in only **10/30** cells. So:
+  *isomorphic graph, hence identical optimal cost; the 0-3.3% heuristic spread
+  measures label sensitivity, not structure.* The original claim "its fill
+  numbers are necessarily identical" is **false**.
+- **`chain_1d_nn` is `Q_{q-1}` doubled — proved, not observed.** The prefix-XOR
+  map `y_k = x_0 ^ ... ^ x_k` (k=0..q-2) sends each parity component of the chain
+  Cayley graph isomorphically onto `Q_{q-1}` with standard generators, because
+  generator `(1<<k)|(1<<(k+1))` flips `x_k` and `x_{k+1}`, hence exactly `y_k`.
+  Verified q=3..10, both edge-set isomorphism and exact integer equality of ops:
+
+  ```
+  q= 6  chain ops=     5640  2*Q_5 ops=     5640   ops_sector(chain,q) = ops/n^3(Q,5) = 0.086060
+  q= 7  chain ops=    37604  2*Q_6 ops=    37604   ops_sector(chain,q) = ops/n^3(Q,6) = 0.071724
+  q=10  chain ops= 12309320  2*Q_9 ops= 12309320   ops_sector(chain,q) = ops/n^3(Q,9) = 0.045856
+  ```
+
+  So `chain_1d_nn`'s entire column is the hypercube's, shifted by one `q`, and
+  inherits Result 6(g)'s explanation.
+- **`lattice_2d` degenerates to `chain_1d_nn` for prime `q`** (`families.py`
+  `_square_factor` returns `(1,q)`) — verified q=5,7,11. So at q=11 the sweep has
+  **5** distinct graphs, not 6.
+
+Generally: **any mask set of GF(2)-rank `d` with `|S| = d` IS the `d`-cube per
+sector.** `tree_star` and the open chain both give ops byte-identical to
+`2 * Q_{q-1}` at every q.
+
+## Result 8 — the strongest single piece of evidence: min-degree *is* the optimum
+
+Stronger than any exponent fit. Exact subset DP over **all `n!` orderings** at
+n<=16, argmin permutation re-scored through `harness.eliminate_with_perm`
+(`_hunt_d_optimal.py`):
+
+```
+family            n    OPT   (verified via perm)  min_degree  popcount   lex     md/OPT
+Q_3               8      50                            50        64        71    1.000
+Q_4              16     255                           255       440       561    1.000
+chain_open q=4   16     100                           100       142       142    1.000
+all_nonzero K_16 16    1240                          1240      1240      1240    1.000
+weight2 q=4      16     254                           254       254       254    1.000
+```
+
+**Greedy min-degree attains the true minimum over all `n!` orderings in all five
+computable cases.** This converts "we tried 6 heuristics" into "at every size
+where the optimum is computable, the incumbent heuristic *is* the optimum".
+
+And on the family axis (`_hunt_f_floor.py`): exact `OPT(Q_d) = {1:1, 2:9, 3:50,
+4:255}`; across **294 random mask sets** at q=3,4,5, **zero** had a per-sector
+exact optimum below `OPT(Q_d)` for their own rank `d`; component count was exactly
+`2^(q-rank)` in every case; full-graph `OPT` was exactly `2^(q-d) * sector OPT` in
+every q<=4 case. **`Q_d` is a computationally verified floor over mask families**,
+not just a plausible argument. Combined with Result 8's first table, both axes of
+the search are closed at every size where "beat" is checkable.
+
+Supporting negatives from the same pass:
+
+- **min-fill** (the classical heuristic that usually beats min-degree, absent from
+  the sweep) is **byte-identical** to min-degree on the cube at q=4..9: 255, 1394,
+  8680, 60844, 451854, 3564920 for both.
+- **Gray code, bit-reversal, and coordinate-recursive nested bisection give ops
+  identical to `lex`** at every q tested (0.13696, 0.13632, 0.13613, 0.13607,
+  0.13606, 0.13606, 0.13605 for all four) — they are all related to lex by a cube
+  automorphism. The entire class of "clever bit-permutation orders" is ruled out
+  at once.
+- **Hamming-weight-layered (`popcount_asc`) is the best genuinely new idea and it
+  fails for exactly the RCM reason.** Local exponent rises monotonically over
+  q=6..12: 2.836, 2.852, 2.865, 2.876, 2.886, 2.894. Worse,
+  `ops*log2(n)/n^3` **rises** (0.493, 0.513, 0.529, 0.542, 0.553, 0.562, 0.570) —
+  it decays strictly *slower* than RCM's `1/log` law. The middle-layer separator
+  intuition does not even buy what RCM already buys.
+- **The honest `ops*c^2/n^3` normalisation of Result 2 is a working fake-win
+  detector.** Three deliberately-degenerate families built to fake a sub-cubic
+  result — a single mask (c=2^(q-1)), fixed |S|=3 (c=2^(q-3)), all masks in a
+  3-bit subspace (c=2^(q-3)) — have raw `ops/n^3` falling to 0.00000, a
+  spectacular apparent win, and honest ratios **exactly constant to 5 decimals**
+  across q=6..11: 0.12500, 0.09766, 0.27344.
+
+## Result 9 — the live correction: the sweep measured the wrong cost, and the right one changes the practical answer
+
+**This is the one place the bead overturns session 6, and it must not be
+buried.** The sweep measured *symbolic fill*. `certkit` needs *interval LDL^T*.
+Those are the same arithmetic count but not the same binding constraint.
+
+- The proxy models the arithmetic count well: measured interval multiplications /
+  symbolic ops = **1.019** at q=7 (290828 vs 285367) (`_meth_interval.py`).
+- But **interval width is not monotone in ops**. At q=6, nested dissection uses
+  1.9x min-degree's ops and gets a **770x smaller** max relative pivot width
+  (9.624e-08 vs 7.420e-05). At n=256, RCM uses 1.9x min-degree's ops and gets
+  ~650x *larger* width.
+
+And when you actually run interval LDL^T on a real TFIM `PauliSumReal`
+(`_meth_interval3.py`, `_meth_coverage2.py`):
+
+```
+n=256, largest-gap beta (gap 0.7256, true count 254):
+             natural sym_ops= 2282697  ops/dense=0.4106  straddle@= 197  max_relw=1.313e+00  ABSTAIN
+          min_degree sym_ops=  451854  ops/dense=0.0813  straddle@=None  max_relw=7.722e-06  OK
+   nested_dissection sym_ops=  606707  ops/dense=0.1091  straddle@=None  max_relw=5.855e-06  OK
+
+the actual certkit query ("exactly 1 eigenvalue below beta"):
+q=8 n=256   lambda_0~-9.837951448   lambda_1~-9.468878016   gap=0.369073  beta=-9.653414732
+          min_degree     451854  0.0813   max_relw=2.525e-09  count=1  OK
+q=9 n=512   lambda_0~-11.109565586  lambda_1~-10.780146484  gap=0.329419  beta=-10.944856035
+          min_degree    3564920  0.0799   max_relw=8.466e-10  count=1  OK
+             natural   18261083  0.4094   max_relw=1.189e-06  count=1  OK
+Runtime at n=512, 12 betas each:  min_degree 19.7s   vs   natural 289.8s
+```
+
+**Min-degree-ordered interval LDL^T returns a sound `count = 1` at n=256 and
+n=512 on a real Pauli-sum operator, at 0.08 of same-proxy dense cost, in 19.7s of
+pure Python.** At n=256 with the largest-gap beta the natural order **straddles
+at pivot 197 and must abstain**, while `min_degree`, `amd`, `rcm` and
+`nested_dissection` all complete and return the correct count.
+
+Two things this does and does not mean:
+
+- **It does not make the direction sub-cubic.** Everything in Results 3-8 stands.
+  The growth order is cubic.
+- **It does mean session 6's framing was too strong.** The correct statement is:
+  *cubic in growth order, but a real ~5x-12x constant that raises the practical
+  `n` ceiling by 2-3 doublings and, at n=256, converts an abstain into a sound
+  count.* `DENSE_LIMIT=160` is a **runtime cap, not a soundness cap**, and this
+  route moves it.
+
+One earlier objection is retracted: a straddling pivot is **not** an obstruction
+independent of fill. It is a *gap-resolution* limit. On a uniform beta grid at
+n=512 every ordering abstains for 7-8 of 12 betas, all inside the dense spectral
+bulk where the true gap is below interval resolution — that is the **correct**
+answer there, not a failure. At the gaps `certkit` actually queries (ground-state
+gap 0.369 at n=256, 0.329 at n=512) **no pivot straddles for any ordering**. An
+earlier `beta=0.0` test was void for exactly this reason (nearest eigenvalue to 0
+is +4.222e-02).
+
+## Result 10 — the concrete `DENSE_LIMIT` answer the bead asks for (steps 4-5)
+
+**What `DENSE_LIMIT` actually gates.** `DENSE_LIMIT = 160`
+(`certkit/operators.py:50`) gates `interval_rows()` / `dense_rows()` on
+`DenseSymmetric` (`:102`, `:105`), `SparseCSRSymmetric` (`:146`, `:156`) and
+`PauliSumReal` (`:229`, `:238`). When `interval_rows()` returns `None`,
+`checker.py:338` (`_rule_temple_inertia`) and `checker.py:587`
+(`_rule_count_below`) **abstain outright**. It is purely a cost cap on the dense
+route in `checker.count_eigenvalues_below` (`checker.py:80`), which has no
+sparsity awareness at all. Note also that `certkit/banded.py` **already contains a
+real interval LDL^T** (`count_eigenvalues_below_banded`, `:56`) — it is not
+missing, it is band-restricted (`MAX_BANDWIDTH = 64`), which is exactly what
+session 5 showed cannot fit a Pauli Cayley graph.
+
+**The cost law used.** *Not* the polylog law — that survived only for RCM on the
+hypercube, and RCM is not the ordering you would ship (min-degree beats it at
+every size: 451854 vs 878427 ops at n=256). The honest law over the `n` range that
+matters is a constant-factor cubic, measured with `harness.min_degree_fill`, and
+stated against the *same-proxy* dense baseline `n^3/3` per Result 2:
+
+```
+hypercube_tfim   ops = 0.0264 n^3    12.5x fewer ops than same-proxy dense
+all_to_all       ops = 0.0528 n^3     6.3x
+jw_two_body      ops = 0.0800 n^3     4.2x     <-- the H4/N2 chemistry shape
+```
+
+**The interval overhead cancels; the data-structure penalty does not.** Both
+sides of the comparison are interval arithmetic, so the "interval ops cost more"
+factor cancels. What does not cancel is the sparse route's dict-of-dicts penalty,
+and it was measured rather than assumed:
+
+```
+dense array inner triple:  0.96 us/op            (1.301 s / 1353880 ops at n=160)
+sparse dict-of-dicts:      1.37 / 1.27 / 1.26 / 1.33 / 1.02 us/op  at n=64/128/256/512/1024
+```
+
+That 1.06x-1.4x per-op penalty eats ~1.35 of the 12.5x ops win, leaving a **net
+measured 9.1x at n=256 and 11.8x at n=1024**.
+
+**The raised limit.** Solving for the `n` at which a fill-reducing interval LDL^T
+costs what the dense route costs today at n=160 (measured: 1.301 s):
+
+```
+TFIM shape:   1.30e-6 * 0.0264 * n^3 = 1.301  ->  n = 336
+JW two-body:  1.30e-6 * 0.0800 * n^3 = 1.301  ->  n = 232
+```
+
+So the honest raised `DENSE_LIMIT` at the current cost budget is **336 for the toy
+TFIM shape and 232 for the chemistry shape the bead actually cares about** — a
+2.1x / 1.45x raise in `n` over 160.
+
+**Does that reach the sizes certkit-ph1 needs?**
+
+- **n=256 (H4): yes — but not because of anything in this bead.** Setting
+  `DENSE_LIMIT = 256` reaches it with the *existing dense code* in 5.40 s and
+  23 MB, verified sound at the real 1.46e-3 ground-state gap. The fill-reducing
+  route makes that 0.44 s instead of 4.0 s. Welcome, and irrelevant to
+  feasibility.
+- **n=4096 (N2): no. Not close.** Missed by roughly 45x:
+
+```
+sparse, TFIM shape:  0.0343 us * 4096^3 =  2357 s = 39 min   per beta
+sparse, JW shape:    0.104  us * 4096^3 =  7160 s = 119 min  per beta
+dense:               0.3175 us * 4096^3 = 21800 s = 6.1 h    plus ~4 GB
+```
+
+and `certkit` needs several betas, not one. Memory for the sparse route
+extrapolates from a measured 93 MB at n=1024 to GB scale at n=4096.
+
+**Recommendation: do not implement the fill-reducing interval LDL^T.** The
+measured return is a 160 -> ~232-336 raise for a substantial new sparse
+interval-arithmetic implementation, while the target n=4096 is missed by ~45x.
+
+**But there is a cheap actionable finding, and it is the practical payoff of this
+bead:** `DENSE_LIMIT = 160` is a conservatively-set *runtime* cap, not a soundness
+cap, and simply **raising it to 256 reaches H4 with the code that already exists**,
+in 5.4 s and 23 MB, with a sound count at the true gap. No new route required.
+That is filed separately rather than done here, because this bead's scope
+explicitly forbids touching trusted code.
+
+## Honest limits — what was not tested, and what would change the answer
+
+- **q >= 15 was not reached, and cannot be with this harness.** RCM elimination
+  time grows faster than ops (q=12: 24.5s, q=13: 165s, q=14: 3194s — a 19x jump
+  for a 7.4x ops increase, from Python `set` overhead at ~42M fill edges). q=15
+  is likely 15+ hours and >4GB. **q=14 is a practical ceiling without rewriting
+  the elimination.** If RCM's `q`-exponent kept declining past 1 rather than
+  converging to it, the polylog reading of Result 6 would be wrong — the data
+  cannot rule that out beyond q=14.
+- **The exponent fits rest on 5 points (7 for the ambiguous cells).** 12/48 CIs
+  contain both 3.00 and 2.85; 9/48 verdicts flip under leave-one-out. Those 13
+  cells are genuinely unresolved by this data, not "shown cubic".
+- **Exact optimality was only computable at n <= 16.** `min_degree == OPT` is
+  proved there and nowhere else. If min-degree diverged from the optimum at large
+  n by more than a constant factor, Result 8's first table would not detect it.
+- **`C(q, q//2)` is still not proved to be the minimum balanced separator of
+  `Q_q`** — session 6's open gap, unchanged. Result 6(g) makes it moot for the
+  measured `max_deg/n`, which matches `C(q,q/2)/2^q` directly, but the worst-case
+  bound is still borrowed from Harper's theorem, not re-derived.
+- **The family axis is weaker than 8.** Six distinct graphs at composite q, five
+  at prime q, 36 distinct ops-vectors among 48 cells. A family with a
+  genuinely different separator structure — not a Cayley graph on `Z_2^q` — was
+  never tested, because `PauliSumReal` cannot produce one.
+- **Interval width was measured at n <= 512 only**, on TFIM, at the ground-state
+  gap. Whether min-degree-ordered interval LDL^T stays sound at n=1024+ or on
+  chemistry-shaped (JW two-body) operators — where Result 6(f) shows RCM buys no
+  polylog at all and `ops/sector` sits at 0.32, i.e. **97% of dense** — is
+  untested. The `jw_two_body` numbers are the discouraging ones and should be the
+  next thing measured if anyone continues.
+- **No molecular fixture.** Same as sessions 5-6: synthetic random one/two-body
+  Hamiltonians of the right *shape*, sufficient for scaling questions, not a
+  chemistry bridge.
+
+## Scripts
+
+All under
+`sandbox-handoffs/certkit-cpo`,
+all **scratch, numpy-free, stdlib-only, and rerunnable**. Nothing in `certkit/`,
+`tests/`, or `examples/` was touched; the trust boundary is untouched.
+
+```
+cd .../scratchpad/cpo && uv run python analyze.py          # sweep + exponent fits + decision rule
+```
+
+| file | what it does |
+|---|---|
+| `harness.py` | `build_adj` / `eliminate_with_perm` / `min_degree_fill` (session-6 code, verbatim) |
+| `families.py` | the 8 mask families, `q -> (n, masks)` |
+| `ord_{rcm,nd,amd,spectral}.py` | `order(n, masks, time_budget_s) -> permutation` |
+| `run_sweep.py` | driver; `n_components()` by GF(2) rank, cross-checked against BFS |
+| `analyze.py` | exponent fits and the pre-registered decision rule |
+| `sweep.json` / `sweep.log` | 240 cells, 6 x 8 x q=8..12, all complete |
+| `amb.json`, `amd.json` | q=6..12 extension for the four ambiguous cells |
+| `_law_extend.py`, `_law_fit.py`, `_law_predict.py`, `_law_ext.json` | q=13/14 runs and the head-to-head law fits (Result 6) |
+| `_law_structure.py`, `_law_chain.py` | RCM = decreasing-Hamming-weight proof; prefix-XOR chain isomorphism |
+| `_hunt_d_optimal.py`, `_hunt_f_floor.py` | exact `n!` subset DP; the `Q_d` floor over 294 random mask sets |
+| `_hunt_{a,b,c,g}_*.py` | extra orderings, extra families, min-fill, hybrids |
+| `_meth_sectors.py` | sector equality, additivity, and the 3x baseline correction |
+| `_meth_degeneracy.py` | JW == all_to_all, BK isomorphism, lattice-at-prime-q |
+| `_meth_fit.py` | CIs, leave-one-out, `K_n` and `n^3/log n` controls |
+| `_meth_interval*.py`, `_meth_coverage*.py` | **interval LDL^T soundness at n=256/512 (Result 9)** |
+| `_verify_*.py` | the adversarial verification pass on harness, families, and each ordering |
+
+A prior adversarial pass verified the harness and every ordering: harness FIXED,
+families SOUND, `ord_rcm` FIXED, `ord_nd` FIXED, `ord_amd` SOUND, `ord_spectral`
+FIXED, zero refuted. The newly generated q=6..12 rows for `all_to_all`,
+`jw_two_body` and `lattice_2d` reproduce `sweep.json`/`amb.json` **exactly** (e.g.
+`all_to_all q=12 ops=2258809136`, `jw_two_body q=12 ops=5253868532`), so the
+extension runs share the harness and are consistent with the prior sweep.
+
+## Where this leaves the cumulative-state table
+
+The row *"Fill-reducing sparse (non-banded) LDL^T reordering — same cubic order,
+constant-factor only (computed), session 6"* should be amended to:
+
+| Avenue | Status | Session |
+|---|---|---|
+| Fill-reducing sparse (non-banded) LDL^T reordering | cubic growth order confirmed across 6 orderings x 8 families x 5 doublings, plus 6 further orderings; RCM/ND buy a `1/q` polylog on the hypercube only; **but min-degree-ordered interval LDL^T gives a sound count at n=256 and n=512, converting an abstain into a sound count at n=256** | 6, 7 |
+
+The asymptotic door is closed. The *coverage* door this bead opened by accident
+is not — Result 9 is a measured, reproducible improvement on a real
+`PauliSumReal` at the bead's own stated size floor of 256, and no session has yet
+asked whether that is worth wiring into `banded.py`. That question is new and is
+the one thing this bead leaves genuinely open.
 
 ## Sessions 1-5's results (unchanged, kept for context)
 
