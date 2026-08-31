@@ -2,13 +2,13 @@
   certkit -- soundness obligations, stated in Lean 4 / mathlib4.
 
   STATUS: compiles clean against the pinned mathlib (see lake-manifest.json).
-  Four of the seven theorems below are real, zero-`sorry` proofs:
-  `rayleigh_ritz_min`, `inertia_count_below`, `gershgorin_lower`, and
-  `sweep_backward_bound` (that last one has its own doc comment on exactly
-  what it does and does not cover). The other three --
-  `residual_encloses_some_eigenvalue`, `temple_lower`, and `weyl_shift` --
-  are still `sorry`: a specification of intent, not a verified artifact. Do
-  not read this file as "soundness-complete."
+  Five of the seven theorems below are real, zero-`sorry` proofs:
+  `rayleigh_ritz_min`, `inertia_count_below`, `gershgorin_lower`,
+  `temple_lower`, and `sweep_backward_bound` (that last one has its own doc
+  comment on exactly what it does and does not cover). The other two --
+  `residual_encloses_some_eigenvalue` and `weyl_shift` -- are still `sorry`:
+  a specification of intent, not a verified artifact. Do not read this file
+  as "soundness-complete."
 
   The point of the file is the correspondence. The Python checker performs
   exactly two mathematical steps, and each is one theorem here:
@@ -212,24 +212,81 @@ theorem residual_encloses_some_eigenvalue (x : n → ℝ) (hx : x ≠ 0) :
     search found the bound violated in 9362 of 200000 trials (worst margin
     ≈ 1.83 at `n = 3`; full data in `sandbox-handoffs/certkit-8y2.3.md`).
     `residualNorm` is now defined with an explicit Euclidean norm
-    (`Real.sqrt (r ⬝ᵥ r)`), so the statement is true again; still `sorry`.
+    (`Real.sqrt (r ⬝ᵥ r)`), which made the statement true again, and it is
+    now a real, zero-`sorry` proof.
 
-    Remaining obligation: `posSemidef_shift_mul_shift` gives
+    Derivation: `posSemidef_shift_mul_shift` gives
     `0 ≤ x ⬝ᵥ (((A - β•1)*(A - c•1)) *ᵥ x)` with `c := ⨅ j, eigenvalues j`
     (its `hcase` holds: `λ_i ≥ c` always, and either `λ_i ≥ β` or, by `hgap`,
-    `λ_i = c`). Dividing by `s := x ⬝ᵥ x > 0` and writing
-    `(residualNorm A x)^2 = (r ⬝ᵥ r)/s = q/s - μ^2` with `μ := rayleigh A x`,
-    `q := (A *ᵥ x) ⬝ᵥ (A *ᵥ x)`, the expansion collapses to
-    `(residualNorm A x)^2 ≥ (β - μ)(μ - c)`, which rearranges to the goal.
-    Same shape as `rayleigh_ritz_min`'s `hexpand`, but for a product of two
-    shifts. -/
+    `λ_i = c`). Expanding that product (`hexpand`, the same shape as
+    `rayleigh_ritz_min`'s `hexpand` but for a product of two shifts, using
+    `A` symmetric to fold `x ⬝ᵥ (A *ᵥ (A *ᵥ x))` into `(A*ᵥx) ⬝ᵥ (A*ᵥx)`) and
+    separately expanding `(residualNorm A x)^2 = (r ⬝ᵥ r)/s` (`hrr`, with
+    `s := x ⬝ᵥ x > 0` and `r := A*ᵥx - μ•x`, `μ := rayleigh A x`) both reduce
+    to the same quantity `(A*ᵥx)⬝ᵥ(A*ᵥx) - μ^2*s`, which lets the PSD
+    inequality be rewritten as `s*(μ-c)*(β-μ) ≤ r ⬝ᵥ r`. Dividing by `s > 0`
+    and then by `β - μ > 0` (from `hμβ`) gives `μ - c ≤ (residualNorm A x)^2 /
+    (β - μ)`, which rearranges to the goal. -/
 theorem temple_lower
     (x : n → ℝ) (hx : x ≠ 0) (β : ℝ)
     (hμβ : rayleigh A x < β)
     (hgap : ∀ i, hA.eigenvalues i < β → hA.eigenvalues i = ⨅ j, hA.eigenvalues j) :
     rayleigh A x - (residualNorm A x) ^ 2 / (β - rayleigh A x)
       ≤ ⨅ i, hA.eigenvalues i := by
-  sorry
+  have hxx_pos : 0 < x ⬝ᵥ x := by
+    simpa [star_trivial] using (Matrix.dotProduct_self_star_pos_iff (v := x)).mpr hx
+  have hcase : ∀ i, 0 ≤ (hA.eigenvalues i - β) * (hA.eigenvalues i - ⨅ j, hA.eigenvalues j) := by
+    intro i
+    rcases lt_or_ge (hA.eigenvalues i) β with hlt | hge
+    · rw [hgap i hlt]; simp
+    · have hcle : (⨅ j, hA.eigenvalues j) ≤ hA.eigenvalues i :=
+        ciInf_le (Set.Finite.bddBelow (Set.finite_range hA.eigenvalues)) i
+      exact mul_nonneg (by linarith) (by linarith)
+  have hpsd := posSemidef_shift_mul_shift hA β (⨅ j, hA.eigenvalues j) hcase
+  have hnn : 0 ≤ x ⬝ᵥ
+      (((A - β • (1 : Matrix n n ℝ)) * (A - (⨅ j, hA.eigenvalues j) • (1 : Matrix n n ℝ)))
+        *ᵥ x) := by
+    simpa [star_trivial] using hpsd.dotProduct_mulVec_nonneg x
+  have hAsymm : Aᵀ = A := by
+    rw [← Matrix.conjTranspose_eq_transpose_of_trivial]
+    exact hA
+  have hq : x ⬝ᵥ (A *ᵥ (A *ᵥ x)) = (A *ᵥ x) ⬝ᵥ (A *ᵥ x) := by
+    have h := dotProduct_transpose_mulVec A x (A *ᵥ x)
+    rwa [hAsymm] at h
+  have hxAx : x ⬝ᵥ (A *ᵥ x) = rayleigh A x * (x ⬝ᵥ x) := by
+    rw [rayleigh, div_mul_cancel₀ _ (ne_of_gt hxx_pos)]
+  have hexpand :
+      x ⬝ᵥ (((A - β • (1 : Matrix n n ℝ)) * (A - (⨅ j, hA.eigenvalues j) • (1 : Matrix n n ℝ)))
+          *ᵥ x)
+        = (A *ᵥ x) ⬝ᵥ (A *ᵥ x)
+          - ((⨅ j, hA.eigenvalues j) + β) * (rayleigh A x * (x ⬝ᵥ x))
+          + β * (⨅ j, hA.eigenvalues j) * (x ⬝ᵥ x) := by
+    simp only [← Matrix.mulVec_mulVec, Matrix.sub_mulVec, Matrix.smul_mulVec, Matrix.one_mulVec,
+      Matrix.mulVec_sub, Matrix.mulVec_smul, dotProduct_sub, dotProduct_smul, smul_eq_mul]
+    rw [hq, hxAx]
+    ring
+  rw [hexpand] at hnn
+  have hrr : (A *ᵥ x - rayleigh A x • x) ⬝ᵥ (A *ᵥ x - rayleigh A x • x)
+      = (A *ᵥ x) ⬝ᵥ (A *ᵥ x) - (rayleigh A x) ^ 2 * (x ⬝ᵥ x) := by
+    simp only [sub_dotProduct, dotProduct_sub, dotProduct_smul, smul_dotProduct, smul_eq_mul]
+    rw [dotProduct_comm (A *ᵥ x) x, hxAx]
+    ring
+  have hrr_nonneg : 0 ≤ (A *ᵥ x - rayleigh A x • x) ⬝ᵥ (A *ᵥ x - rayleigh A x • x) := by
+    simpa [star_trivial] using dotProduct_self_star_nonneg (A *ᵥ x - rayleigh A x • x)
+  have hresidualNorm_sq : (residualNorm A x) ^ 2
+      = ((A *ᵥ x) ⬝ᵥ (A *ᵥ x) - (rayleigh A x) ^ 2 * (x ⬝ᵥ x)) / (x ⬝ᵥ x) := by
+    unfold residualNorm
+    rw [div_pow, Real.sq_sqrt hrr_nonneg, Real.sq_sqrt hxx_pos.le, hrr]
+  have hkey : (rayleigh A x - ⨅ j, hA.eigenvalues j) * (β - rayleigh A x)
+      ≤ (residualNorm A x) ^ 2 := by
+    rw [hresidualNorm_sq, le_div_iff₀ hxx_pos]
+    nlinarith [hnn]
+  have hβμ_pos : 0 < β - rayleigh A x := by linarith
+  have hstep : rayleigh A x - (⨅ j, hA.eigenvalues j)
+      ≤ (residualNorm A x) ^ 2 / (β - rayleigh A x) := by
+    rw [le_div_iff₀ hβμ_pos]
+    exact hkey
+  linarith
 
 /-- **Sylvester inertia count.** The number of negative pivots in an LDLᵀ
     factorisation of `A - β • 1` equals the number of eigenvalues below `β`.
@@ -333,14 +390,160 @@ open scoped Matrix.Norms.L2Operator in
     `sturm_be` actually computes at runtime; relating the two remains part of
     the open obligation this theorem's `sorry` stands for.
 
-    Checked this session: mathlib has no Weyl eigenvalue-perturbation
-    inequality, Courant-Fischer min-max characterisation, or comparable
-    variational eigenvalue result under any name (`grep -rl weyl|courant|
-    minimax` across `Mathlib/` turns up nothing on point). Proving this from
-    what mathlib does have (`Matrix.IsHermitian.eigenvalues`, the spectral
-    theorem, `Analysis.Matrix.PosDef`) means formalising a Courant-Fischer-style
-    min-max argument first -- a substantial, self-contained project, not a
-    short lemma. Left `sorry` rather than attempted partially. -/
+    Checked across four independent sessions now: mathlib has no Weyl
+    eigenvalue-perturbation inequality, Courant-Fischer min-max
+    characterisation, or comparable variational eigenvalue result under any
+    name (`grep -rl weyl|courant|minimax` across `Mathlib/` turns up nothing
+    on point, confirmed again this session against mathlib commit
+    `5ba95124681110751345e9bd360994de8541027c`, 2026-08-28).
+    `Mathlib.Analysis.InnerProductSpace.Spectrum` (where
+    `LinearMap.IsSymmetric.eigenvalues`, the thing `eigenvalues₀` above is
+    literally built from) has only the *extreme*-eigenvalue variational facts
+    -- `hasEigenvalue_iSup_of_finiteDimensional`,
+    `hasEigenvalue_iInf_of_finiteDimensional` -- and no indexed
+    Courant-Fischer statement; `Mathlib.Analysis.InnerProductSpace.Rayleigh`
+    likewise gives only `norm_eq_iSup_rayleighQuotient` (operator norm as a
+    sup over *all* vectors) and nothing about a single indexed eigenvalue.
+    An equivalent-difficulty route -- prove Loewner-order monotonicity
+    (`A ⪯ B → ∀ k, eigenvalues₀ A k ≤ eigenvalues₀ B k`, which composed with
+    `‖A-B‖•1 - (A-B)` being `PosSemidef` would give this theorem in a few
+    lines) -- needs exactly the same missing content: that monotonicity
+    claim *is* Weyl's monotonicity theorem, itself normally proved via
+    Courant-Fischer or Cauchy interlacing.
+
+    This session (2026-08-31, split into its own bead certkit-8y2.6) built
+    and *verified compiling* (zero `sorry`, `lake env lean` clean) the "hard
+    direction" of Courant-Fischer at the abstract `LinearMap.IsSymmetric` /
+    `InnerProductSpace ℝ E` level, in a scratch file (not integrated here --
+    see below for why). Reproduce by pasting into a throwaway
+    `Certkit/Scratch.lean` and running `lake env lean Certkit/Scratch.lean`:
+
+    ```
+    import Mathlib.Analysis.InnerProductSpace.Spectrum
+    import Mathlib.Analysis.InnerProductSpace.PiL2
+
+    open scoped Matrix RealInnerProductSpace
+
+    variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E] [FiniteDimensional ℝ E]
+    variable {n : ℕ} {T : E →ₗ[ℝ] E}
+
+    private lemma inf_ne_bot_of_finrank_lt (s t : Submodule ℝ E)
+        (h : Module.finrank ℝ E < Module.finrank ℝ ↥s + Module.finrank ℝ ↥t) :
+        s ⊓ t ≠ ⊥ := by
+      intro hbot
+      have h1 : Module.finrank ℝ ↥(s ⊔ t) + Module.finrank ℝ ↥(s ⊓ t)
+          = Module.finrank ℝ ↥s + Module.finrank ℝ ↥t := Submodule.finrank_sup_add_finrank_inf_eq s t
+      rw [hbot] at h1
+      simp at h1
+      have h2 : Module.finrank ℝ ↥(s ⊔ t) ≤ Module.finrank ℝ E := Submodule.finrank_le _
+      omega
+
+    private lemma finrank_span_Iio_image [DecidableEq E] {b : Fin n → E} (hb : Orthonormal ℝ b)
+        (i₀ : Fin n) :
+        Module.finrank ℝ (Submodule.span ℝ ((Finset.Iio i₀).image b : Set E)) = i₀.val := by
+      rw [Module.finrank_eq_card_basis (OrthonormalBasis.span hb (Finset.Iio i₀)).toBasis]
+      rw [Fintype.card_coe, Fin.card_Iio]
+
+    /-- Hard direction of Courant-Fischer: any subspace of dimension `i₀.val + 1`
+    contains a nonzero vector whose Rayleigh quotient is at most `eigenvalues i₀`. -/
+    theorem courant_fischer_le (hT : T.IsSymmetric) (hn : Module.finrank ℝ E = n)
+        (V : Submodule ℝ E) (i₀ : Fin n) (hV : Module.finrank ℝ V = i₀.val + 1) :
+        ∃ x ∈ V, x ≠ 0 ∧ ⟪x, T x⟫ ≤ hT.eigenvalues hn i₀ * ⟪x, x⟫ := by
+      classical
+      set b := hT.eigenvectorBasis hn with hb_def
+      have hb_orth : Orthonormal ℝ b := b.orthonormal
+      set U : Submodule ℝ E := Submodule.span ℝ ((Finset.Iio i₀).image b : Set E) with hU_def
+      have hUfin : Module.finrank ℝ U = i₀.val := finrank_span_Iio_image hb_orth i₀
+      have hWfin : Module.finrank ℝ Uᗮ = n - i₀.val := by
+        have hadd := U.finrank_add_finrank_orthogonal
+        rw [hn, hUfin] at hadd
+        omega
+      have hpigeon : V ⊓ Uᗮ ≠ ⊥ := by
+        apply inf_ne_bot_of_finrank_lt
+        rw [hV, hWfin, hn]
+        have : i₀.val < n := i₀.isLt
+        omega
+      obtain ⟨x, hxmem, hxne⟩ := Submodule.ne_bot_iff _ |>.mp hpigeon
+      obtain ⟨hxV, hxW⟩ := Submodule.mem_inf.mp hxmem
+      refine ⟨x, hxV, hxne, ?_⟩
+      have hbTb : ∀ j, T (b j) = hT.eigenvalues hn j • b j := hT.apply_eigenvectorBasis hn
+      have hzero : ∀ j, j < i₀ → ⟪b j, x⟫ = 0 := by
+        intro j hj
+        have hbjU : b j ∈ U :=
+          Submodule.subset_span (Finset.mem_coe.mpr (Finset.mem_image_of_mem b (Finset.mem_Iio.mpr hj)))
+        exact Submodule.inner_right_of_mem_orthogonal hbjU hxW
+      have hxx : ⟪x, x⟫ = ∑ j, ⟪b j, x⟫ ^ 2 := by
+        rw [← b.sum_inner_mul_inner x x]
+        congr 1
+        funext j
+        rw [real_inner_comm x (b j), sq]
+      have hxTx : ⟪x, T x⟫ = ∑ j, hT.eigenvalues hn j * ⟪b j, x⟫ ^ 2 := by
+        rw [← b.sum_inner_mul_inner x (T x)]
+        congr 1
+        funext j
+        have hsymm : ⟪b j, T x⟫ = ⟪T (b j), x⟫ := (hT (b j) x).symm
+        rw [real_inner_comm (b j) x, hsymm, hbTb j, real_inner_smul_left, sq]
+        ring
+      rw [hxTx, hxx, Finset.mul_sum]
+      apply Finset.sum_le_sum
+      intro j _
+      rcases lt_or_ge j i₀ with hlt | hge
+      · rw [hzero j hlt]; simp
+      · have hantitone : hT.eigenvalues hn j ≤ hT.eigenvalues hn i₀ :=
+          hT.eigenvalues_antitone hn hge
+        nlinarith [sq_nonneg (⟪b j, x⟫)]
+    ```
+
+    Not integrated into this file because it does not by itself discharge
+    `weyl_shift`: three more pieces stand between it and the theorem below,
+    none attempted yet, roughly increasing in expected difficulty.
+
+    1. **Easy direction** (companion lemma, expected tractable): for `x` in
+       the span of the *top* `i₀.val + 1` eigenvectors `b 0 .. b i₀`,
+       `eigenvalues i₀ * ⟪x,x⟫ ≤ ⟪x,T x⟫`. Same Parseval expansion as
+       `courant_fischer_le`'s proof above, but needs "`x ∈ span (b '' s)` ⟹
+       `⟪b k, x⟫ = 0` for `k ∉ s`" as a side fact -- not found ready-made in
+       `Mathlib.Analysis.InnerProductSpace.{PiL2,Orthogonal}` (searched this
+       session); doable directly from `Submodule.mem_span_finset` plus
+       `Orthonormal`'s pairwise-orthogonality, not yet written.
+
+    2. **Loewner monotonicity**: combine both directions to get, for
+       symmetric `T_A, T_B` on the same `E` with `T_A - T_B` positive
+       semidefinite, `eigenvalues_B i₀ ≤ eigenvalues_A i₀` for every `i₀`.
+       Sketch (standard): apply `courant_fischer_le` to `T_A` at
+       `V = span (B's top i₀+1 eigenvectors)` to get `x* ∈ V`,
+       `⟪x*,T_A x*⟫ ≤ eigenvalues_A i₀ * ⟪x*,x*⟫`; combine with
+       `⟪x*,T_B x*⟫ ≤ ⟪x*,T_A x*⟫` (positive semidefiniteness of
+       `T_A - T_B`) and the easy direction applied to `T_B` at the same `x*`
+       (`eigenvalues_B i₀ * ⟪x*,x*⟫ ≤ ⟪x*,T_B x*⟫`) to chain the inequality
+       through. Not yet written; depends on (1).
+
+    3. **Bridge to `Matrix.IsHermitian`**: `weyl_shift` is stated over
+       `Matrix n n ℝ` / `hA.eigenvalues : n → ℝ`, not the abstract
+       `LinearMap.IsSymmetric.eigenvalues` used above. Whether these two
+       eigenvalue functions provably agree under `Matrix.toEuclideanLin` (or
+       the `PiLp`/`EuclideanSpace n ℝ` identification `Mathlib.Analysis.
+       Matrix.Spectrum` actually uses to define `Matrix.IsHermitian.
+       eigenvalues` in the first place) was **not checked this session** --
+       genuinely unknown difficulty, could be a short `simp`-able
+       coincidence-of-definitions lemma or its own multi-step project.
+
+    4. **Operator-norm sandwich**: even granting 1-3, `weyl_shift`'s stated
+       form is the *shift* inequality (`|λ_i(A) - λ_i(B)| ≤ ‖A-B‖`), not raw
+       Loewner monotonicity. Getting from one to the other needs
+       `B - t•1 ⪯ A ⪯ B + t•1` for `t = ‖A-B‖`, i.e. that the `L²` operator
+       norm of a Hermitian matrix bounds every eigenvalue in absolute value
+       -- another fact not located in mathlib this session (only
+       `norm_eq_iSup_rayleighQuotient`, an unindexed sup-over-all-vectors
+       statement, was found; connecting it to a single indexed eigenvalue's
+       absolute value is itself unproven work).
+
+    Given three prior sessions' conclusion that this is a self-contained
+    formalisation project and this session's own experience -- a genuinely
+    new, verified result on step 0, with three more steps of unassessed
+    (2-3) to unknown (3-4, possibly the largest) size still ahead -- this
+    remains correctly scoped as its own bead rather than a session-sized
+    lemma. Left `sorry`. -/
 theorem weyl_shift {B : Matrix n n ℝ} (hB : B.IsHermitian) (i : n) :
     |hA.eigenvalues i - hB.eigenvalues i| ≤ ‖A - B‖ := by
   sorry
