@@ -46,7 +46,7 @@ introduce a magic number to make an analysis come out; derive it or abstain.
 
 **The documented limits are measurements and must survive you.** The README
 states that coverage falls to zero as the spectral gap closes, that
-`DENSE_LIMIT = 160` makes the tight route decline rather than run for an hour,
+`DENSE_LIMIT = 256` makes the tight route decline rather than run for an hour,
 that Gershgorin is "a floor, not a good bound", and that past n ≈ 10⁴ the
 producer's eigenvector is the binding constraint. Those are honest results. If
 you improve something, **re-measure and report the new number — do not upgrade

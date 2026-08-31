@@ -504,19 +504,31 @@ milestone in itself, and the interval-arithmetic layer is the one after that.
   producer pays, never a soundness gap the checker has (certkit-487).
 - The forward-enclosure routes still grow, and still abstain rather than rounding
   a pivot to a sign. They remain the only option above bandwidth 1.
-- `DENSE_LIMIT = 160` — interval LDLᵀ is cubic in pure Python, so above that the
-  tight route declines rather than running for an hour.
+- `DENSE_LIMIT = 256` — interval LDLᵀ is cubic in pure Python, so above that
+  the tight route declines rather than running for an hour. Raised from 160
+  (certkit-l7r): this was measured to be a runtime cap, not a soundness cap
+  (certkit-ph1 session 7) — 256 was chosen because it is exactly what an
+  8-qubit (n=256) JW-two-body-shaped Pauli sum needs, at a measured ~4.8s and
+  ~9MB (traced) / ~47MB (peak RSS) per beta, ~50s for a 12-beta sweep. Not
+  raised further: n=512 was not re-measured and should not be assumed to cost
+  the same, and the coverage-cliff investigation below found the tight route's
+  reach past a few hundred dimensions genuinely exhausted, not merely
+  under-tuned.
 - **Large matrix-free Pauli-sum operators past `DENSE_LIMIT` have no
   Temple-quality route.** The inertia route needs the dense O(n³) LDLᵀ; the
   banded route needs bounded bandwidth, which a Pauli sum never has (a single
   term on qubit *k* puts a nonzero at column 2ᵏ). That leaves Gershgorin,
   whose width grows with the operator — 100–1600× chemical accuracy on
-  H4/N2-scale Hamiltonians. Six investigation sessions (`certkit-ph1`,
-  `sandbox-handoffs/certkit-ph1.md`) ruled out every matrix-free counting
-  rule proposed: the whole matvec-oracle family by an adversarial lower
-  bound, and term-count / FEAST / fill-reducing LDLᵀ by direct computation.
-  Every enclosure certkit does return stays sound; this is a coverage
-  ceiling, not a soundness gap.
+  N2-scale Hamiltonians (n=4096, still far past `DENSE_LIMIT`). H4-scale
+  (n=256, 8 qubits) now fits under the raised `DENSE_LIMIT` and gets the same
+  dense inertia route as everything else — a certified width of ~10⁻¹⁴ against
+  a 1.6 mHa chemical-accuracy bar, roughly eleven orders of magnitude tighter
+  than required (certkit-l7r). Six investigation sessions (`certkit-ph1`,
+  `sandbox-handoffs/certkit-ph1.md`) ruled out every matrix-free counting rule
+  proposed for the sizes that remain past `DENSE_LIMIT`: the whole
+  matvec-oracle family by an adversarial lower bound, and term-count / FEAST /
+  fill-reducing LDLᵀ by direct computation. Every enclosure certkit does
+  return stays sound; this is a coverage ceiling, not a soundness gap.
 - Gershgorin is weak on operators with large off-diagonal mass. It is a floor,
   not a good bound.
 

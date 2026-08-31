@@ -111,7 +111,7 @@ def main() -> None:
         print(f"{n:>7}  {eigs[1] - eigs[0]:>10.2e}  {out[0]:>18}  {out[1]:>21}")
 
     print(
-        "\nThe dense route stops at n = 160 because an O(n^3) interval factorisation\n"
+        "\nThe dense route stops at n = 256 because an O(n^3) interval factorisation\n"
         "in pure Python is not a route. On this tridiagonal fixture, the producer's\n"
         "ground state now comes from LAPACK's tridiagonal eigensolver rather than a\n"
         "few hundred steps of matrix-free Lanczos (certkit-8q0), so the certified\n"

@@ -47,7 +47,20 @@ from .schema import SchemaError, digest, f2h, h2f, require
 # LDL^T is cubic in pure Python, so the ceiling is low and deliberately so: a
 # route that would take an hour is not a route, and pretending otherwise just
 # moves the failure somewhere less visible.
-DENSE_LIMIT = 160
+#
+# This is a runtime cap, not a soundness cap (certkit-ph1 session 7,
+# certkit-l7r): raising it only changes how large an operator the dense
+# inertia route is willing to attempt, never what it is allowed to certify.
+# n=256 (an 8-qubit JW-two-body-shaped Pauli sum, certkit-l7r) measured at
+# ~4.8s and ~9MB traced / ~47MB peak-RSS per beta -- seconds, not the "would
+# take an hour" territory the limit exists to avoid, and every beta the
+# checker's several-beta usage actually asks for costs that again (no
+# factorisation is reused across betas), so a 12-beta sweep is ~50s. 256 was
+# chosen, not a larger round number, because it is exactly the size the
+# bead's motivating case (an 8-qubit chemistry-shaped Hamiltonian) needs and
+# no more: n=512 (9 qubits) was not re-measured here and should not be
+# assumed to cost the same.
+DENSE_LIMIT = 256
 
 
 class Operator:
