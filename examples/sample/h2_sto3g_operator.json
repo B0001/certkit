@@ -1,0 +1,66 @@
+{
+  "kind": "pauli_sum_real",
+  "qubits": 4,
+  "terms": [
+    {
+      "coeff": "-0x1.9fd4d369cfb5ep-1",
+      "string": "IIII"
+    },
+    {
+      "coeff": "0x1.5f0db01daa2c4p-3",
+      "string": "ZIII"
+    },
+    {
+      "coeff": "-0x1.c996793f52d81p-3",
+      "string": "IZII"
+    },
+    {
+      "coeff": "0x1.ee14b9eaf1696p-4",
+      "string": "ZZII"
+    },
+    {
+      "coeff": "0x1.5f0db01daa2c4p-3",
+      "string": "IIZI"
+    },
+    {
+      "coeff": "0x1.59799bdce683fp-3",
+      "string": "ZIZI"
+    },
+    {
+      "coeff": "-0x1.c996793f52d7dp-3",
+      "string": "IIIZ"
+    },
+    {
+      "coeff": "0x1.53d1fb1591722p-3",
+      "string": "ZIIZ"
+    },
+    {
+      "coeff": "0x1.731e788062f5cp-5",
+      "string": "YYYY"
+    },
+    {
+      "coeff": "0x1.731e788062f5cp-5",
+      "string": "YYXX"
+    },
+    {
+      "coeff": "0x1.731e788062f5cp-5",
+      "string": "XXYY"
+    },
+    {
+      "coeff": "0x1.731e788062f5cp-5",
+      "string": "XXXX"
+    },
+    {
+      "coeff": "0x1.53d1fb1591722p-3",
+      "string": "IZZI"
+    },
+    {
+      "coeff": "0x1.653293f7955d6p-3",
+      "string": "IZIZ"
+    },
+    {
+      "coeff": "0x1.ee14b9eaf1696p-4",
+      "string": "IIZZ"
+    }
+  ]
+}

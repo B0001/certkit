@@ -561,7 +561,34 @@ milestone in itself, and the interval-arithmetic layer is the one after that.
 - **Krylov solver.** Its two-sided energy bounds are currently trusted because
   the code says so — the same posture that let it return physically impossible
   energies. Emitting a certificate makes them externally auditable, and the
-  matrix-free path is the one that matters there.
+  matrix-free path is the one that matters there. **Done, and recorded:**
+  `examples/sample/h2_sto3g_{certificate,operator}.json` is a real one. See below.
+
+### A certificate from outside this repo
+
+The only producer in this repo is the synthetic one written alongside the
+checker, which makes it a poor test of the format: an author who writes both
+sides can accidentally agree with themselves. `examples/sample/h2_sto3g_*.json`
+is not that. It was produced by a `QuantumKrylovSolver` (QKSD) in a separate
+project, from a pyscf-built H₂/sto-3g Hamiltonian at R = 0.74 Å, Jordan-Wigner
+mapped to 4 qubits — a `pauli_sum_real` operator of 15 terms, dimension 16.
+
+```
+$ python -m certkit.cli check examples/sample/h2_sto3g_certificate.json \
+                              examples/sample/h2_sto3g_operator.json
+VERIFIED  lambda_min_enclosure via temple_inertia  [-1.8523881754220277, -1.8523881717171415]
+```
+
+The two JSON files are self-contained: checking them needs neither the
+producing project nor pyscf, qiskit, or numpy. That is the point of the format,
+and `tests/test_krylov_certificate.py` pins it. Reproducing the certificate is a
+different matter and does need that project — which is the asymmetry the whole
+kit is built on. A certificate is cheap to check and expensive to produce.
+
+Note the operator is a Pauli sum, not CSR. Materialising those 15 terms into a
+sparse matrix sums each entry in floating point, so `(i,j)` and `(j,i)`
+accumulate in different orders; at H₄ scale the result is asymmetric by 8.3e-17
+and the checker refuses it, correctly.
 - **Robot abstention layer.** M0–M3 build an interval substrate, IBP/CROWN
   bounds, and a branch-and-bound discrepancy certifier. Those produce a trusted
   ε; routing them through this format produces a *checkable* ε, and the

@@ -1,0 +1,38 @@
+{
+  "schema": "certkit/1",
+  "claim": {
+    "operator_ref": "blake2b16:dc3016e862f79bf55c2503e34a2eb88e",
+    "kind": "lambda_min_enclosure",
+    "enclosure": {
+      "lo": "-0x1.da361c88ef49dp+0",
+      "hi": "-0x1.da361c7905b91p+0"
+    }
+  },
+  "witness": {
+    "rule": "temple_inertia",
+    "vector": [
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x1.fcbf44782485dp-1",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "-0x1.ccfad199222fbp-4",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0"
+    ],
+    "beta": "-0x1.8d8782c1309b7p+0"
+  },
+  "producer": {
+    "name": "hybrid_quantum_solver.QuantumKrylovSolver",
+    "backend": "numpy"
+  },
+  "content_hash": "blake2b16:769894a828dffd4141518fda93b987d5"
+}
