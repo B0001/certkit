@@ -287,3 +287,21 @@ def test_an_inflated_gamma_budget_abstains_rather_than_asserting(monkeypatch):
     monkeypatch.setattr(be, "GAMMA", 5.0 * be.U)
     with pytest.raises(IntervalError):
         be.sweep([2.0, 2.0], [1.0], 0.0)
+
+
+def test_an_asymmetric_operator_is_refused_without_decode_operator():
+    """certkit-279: sweep() reads only the upper entry of each off-diagonal
+    pair, and the derivation needs symmetry twice (Sylvester, and Weyl via
+    ||E||_2 <= ||E||_inf). decode_operator's check_symmetric closes this in the
+    certified pipeline, but DenseSymmetric is a public constructor that does
+    not self-check, so the refusal has to live here too."""
+    from certkit.operators import DenseSymmetric
+
+    op = DenseSymmetric([[2.0, 1.0, 0.0], [7.0, 2.0, 1.0], [0.0, 1.0, 2.0]])
+    with pytest.raises(IntervalError, match="not symmetric"):
+        tridiagonal_arrays(op)
+
+    # The asymmetry the naive check misses: upper set, mirrored entry absent.
+    op = DenseSymmetric([[2.0, 1.0, 0.0], [0.0, 2.0, 1.0], [0.0, 1.0, 2.0]])
+    with pytest.raises(IntervalError, match="not symmetric"):
+        tridiagonal_arrays(op)

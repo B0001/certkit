@@ -96,10 +96,18 @@ def tridiagonal_arrays(op: Operator) -> tuple[list[float], list[float]]:
     Entries must be exactly representable: an operator whose rows are only
     *enclosed* (a Pauli sum, say) is not something the float recurrence can be
     run on, because there is no single matrix it would be running on.
+
+    Symmetry is checked here rather than assumed. `decode_operator` already
+    refuses an asymmetric operator, but the derivation above needs symmetry
+    twice over -- Sylvester's law on the LDL^T pivot signs, and Weyl via
+    ||E||_2 <= ||E||_inf for symmetric E -- and `sweep` reads only one of each
+    off-diagonal pair. Trusting a caller for that is the kind of silent
+    dependency this kit refuses (certkit-279).
     """
     n = op.n
     diag = [0.0] * n
     off = [0.0] * max(n - 1, 1)
+    low = [0.0] * max(n - 1, 1)  # the mirrored entries, compared at the end
     for i in range(n):
         for j, v in op.row(i).items():
             if v.lo != v.hi:
@@ -113,8 +121,15 @@ def tridiagonal_arrays(op: Operator) -> tuple[list[float], list[float]]:
                 diag[i] = v.lo
             elif j == i + 1:
                 off[i] = v.lo
-            elif j != i - 1:
+            elif j == i - 1:
+                low[i - 1] = v.lo
+            else:
                 raise NotTridiagonal(f"operator is not tridiagonal (entry at {i},{j})")
+    for i, (a, b) in enumerate(zip(off, low)):
+        if a != b:
+            raise IntervalError(
+                f"operator is not symmetric: [{i},{i + 1}] = {a}, [{i + 1},{i}] = {b}"
+            )
     return diag, off
 
 
