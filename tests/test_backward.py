@@ -274,3 +274,16 @@ def test_all_three_count_rules_agree_on_a_shared_problem():
         if expected is None:
             continue
         assert all(check(c, enc).ok for c in certs)
+
+
+def test_an_inflated_gamma_budget_abstains_rather_than_asserting(monkeypatch):
+    """The budget guard must survive -O and route through the abstain path.
+
+    A bare assert would be stripped under python -O and, if it did fire, would
+    raise AssertionError -- which the checker does not catch (certkit-186).
+    """
+    import certkit.backward_error as be
+
+    monkeypatch.setattr(be, "GAMMA", 5.0 * be.U)
+    with pytest.raises(IntervalError):
+        be.sweep([2.0, 2.0], [1.0], 0.0)

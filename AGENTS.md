@@ -126,3 +126,15 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Build & Test
+
+```bash
+uv run --extra dev pytest tests     # 172 passing
+```
+
+Use `--extra dev`. An environment missing scipy does not error — `producer._ground_state`
+silently falls back to Lanczos, and `test_ground_state_eigenvector_is_no_longer_the_binding_constraint`
+fails with a wide enclosure that looks like a real soundness regression but is only a
+missing optional dependency. The checker itself has zero dependencies by design
+(`pyproject.toml`); scipy and numpy are producer- and test-side only.

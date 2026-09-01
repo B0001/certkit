@@ -136,7 +136,8 @@ def sweep(diag: list[float], off: list[float], shift: float) -> Sweep:
     # ||A - Atilde||_inf, accumulated outward-rounded as we go.
     eta = Iv.exact(ETA)
     two_u = Iv.exact(2.0 * U)  # covers |b|*(sqrt(1+gamma) - 1) for |gamma| <= GAMMA
-    assert GAMMA / 2.0 <= 2.0 * U  # sqrt bound is dominated by the budget used
+    if GAMMA / 2.0 > 2.0 * U:  # sqrt bound must stay dominated by the budget used
+        raise IntervalError("GAMMA budget exceeds the coefficient used for |b|*(sqrt(1+gamma) - 1)")
     worst = Iv.exact(0.0)
 
     count = 0

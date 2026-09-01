@@ -60,13 +60,15 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+uv run --extra dev pytest tests     # 172 passing
 ```
+
+Use `--extra dev`. An environment missing scipy does not error — `producer._ground_state`
+silently falls back to Lanczos, and `test_ground_state_eigenvector_is_no_longer_the_binding_constraint`
+fails with a wide enclosure that looks like a real soundness regression but is only a
+missing optional dependency. The checker itself has zero dependencies by design
+(`pyproject.toml`); scipy and numpy are producer- and test-side only.
 
 ## Architecture Overview
 
