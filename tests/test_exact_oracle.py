@@ -15,6 +15,15 @@ inertia count, O(n^3), no band assumption) into both shapes: the dense
 `inertia` route (`certify_lambda_min` / `count_eigenvalues_below`) and the
 banded `sturm` route (`certify_lambda_min_banded` /
 `count_eigenvalues_below_banded`) on matrices that are not tridiagonal.
+
+certkit-9oa adds the third shape `certkit-sqr` deliberately left out: a
+Pauli-sum operator (`pauli_sum_real`, e.g. `producer.tfim_hamiltonian`).
+That shape needs its own ground-truth path rather than reusing
+`operator_to_fraction_rows` -- see `exact_oracle.pauli_sum_to_fraction_rows`
+for why -- but once that path exists, it is wired into the dense `inertia`
+route the same way, since a small enough Pauli-sum operator (`n <=
+DENSE_LIMIT`) takes that exact route already (`test_backends.py::
+test_small_hamiltonian_takes_the_tight_route`).
 """
 
 from __future__ import annotations
@@ -28,8 +37,13 @@ import pytest
 from certkit.banded import count_eigenvalues_below_banded
 from certkit.checker import bundle_verdict, check, check_bundle, count_eigenvalues_below
 from certkit.interval import IntervalError
-from certkit.operators import decode_operator, encode_csr
-from certkit.producer import certify_count_below_sturm, certify_lambda_min, certify_lambda_min_banded
+from certkit.operators import DENSE_LIMIT, decode_operator, encode_csr
+from certkit.producer import (
+    certify_count_below_sturm,
+    certify_lambda_min,
+    certify_lambda_min_banded,
+    tfim_hamiltonian,
+)
 
 from exact_oracle import (
     dense_rows_to_fractions,
@@ -37,6 +51,7 @@ from exact_oracle import (
     exact_lambda_min,
     gershgorin_bracket,
     operator_to_fraction_rows,
+    pauli_sum_to_fraction_rows,
 )
 
 
@@ -164,3 +179,51 @@ def test_a_lying_banded_count_is_caught_and_the_exact_oracle_confirms_the_lie():
     bad_cert, _ = certify_count_below_sturm(enc, beta, true_count + 3)
     v = check(bad_cert, enc)
     assert not v.ok and "re-derived" in v.reason
+
+
+# -- Pauli-sum (matrix-free, but small enough for the tight route) --------
+# `field=1.5` (rather than the default 1.0) breaks the extra Z2/translation
+# degeneracy an un-tilted TFIM chain has, which otherwise makes it *more*
+# likely than a random dense/banded matrix to put an exact grid point of
+# `_beta_sweep` exactly on an eigenvalue of some leading principal submatrix.
+# qubits is capped at 5 (n=32): exact Fraction LDL^T's bit-growth-per-pivot
+# makes n=64 (6 qubits) take ~50s for a single 70-iteration bisection, well
+# past what belongs in this suite -- see `operators.DENSE_LIMIT`'s own
+# comment on the analogous (much cheaper) float/Iv cost, which does not
+# transfer to exact Fraction arithmetic.
+@pytest.mark.parametrize("qubits", [3, 4, 5])
+def test_pauli_inertia_count_matches_exact_rational_oracle(qubits):
+    enc = tfim_hamiltonian(qubits, field=1.5, coupling=1.0)
+    op = decode_operator(enc)
+    assert op.n <= DENSE_LIMIT
+    rows = op.dense_rows()
+    fq_rows = pauli_sum_to_fraction_rows(enc)
+    checked = 0
+    for beta in _beta_sweep(fq_rows):
+        try:
+            got = count_eigenvalues_below(rows, float(beta))
+        except IntervalError:
+            continue  # abstention near an eigenvalue is allowed
+        try:
+            want = exact_count_below(fq_rows, beta)
+        except ZeroDivisionError:
+            continue  # beta hit an exact eigenvalue of a leading submatrix
+        assert got == want, (qubits, beta, got)
+        checked += 1
+    assert checked > 10
+
+
+# -- Pauli-sum: end-to-end enclosure against the exact eigenvalue ---------
+@pytest.mark.parametrize("qubits", [3, 4, 5])
+def test_pauli_lambda_min_enclosure_contains_exact_rational_truth(qubits):
+    enc = tfim_hamiltonian(qubits, field=1.5, coupling=1.0)
+    op = decode_operator(enc)
+    assert op.n <= DENSE_LIMIT
+    v = check(*certify_lambda_min(enc))
+    assert v.ok, v.reason
+    assert v.rule == "temple_inertia"
+    c_lo, c_hi = v.rederived
+
+    fq_rows = pauli_sum_to_fraction_rows(enc)
+    lo, hi = exact_lambda_min(fq_rows, iterations=70)
+    assert Fraction(c_lo) <= lo and hi <= Fraction(c_hi)

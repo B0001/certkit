@@ -1,5 +1,134 @@
 # certkit-kjy — separator/treewidth lower bound for the Pauli-mask Cayley graph
 
+## Status: CLOSED. Proof already existed (committed in 77f2fb8); this session verified it and closed the bead.
+
+The bead was `in_progress` at the start of this session but the working tree
+was already clean — a prior session had written the full proof to
+`sandbox-handoffs/certkit-kjy.md` (this file) and
+`sandbox-handoffs/certkit-kjy-proof-verify.py`, and both were already
+committed as `77f2fb8 handoffs`. The bead's `bd` state (still `in_progress`,
+no completion note) was the only thing not reflecting that — the prior
+session evidently finished the artifact but didn't run the close step. I did
+not redo the mathematical work; I read the proof critically for correctness,
+re-ran its computational verification, re-ran the full suite, and closed the
+bead once satisfied the acceptance criteria were actually met.
+
+**This replaces the previous version of this file** (which is preserved
+verbatim below the divider, since it's still the accurate record of the
+proof itself — I only add this status header and a verification addendum at
+the very end, not touching the math).
+
+---
+
+## This session's verification (2026-09-01)
+
+1. **Read the proof (§1–§9 below) end to end for correctness**, checking in
+   particular:
+   - Lemma 1 (basis-as-literal-subset-of-M ⟹ `Q_r` is a spanning subgraph of
+     `G|_H` for free): correct, definitional given the Gaussian-elimination
+     algorithm keeps original masks.
+   - Lemma 2 (hypercube spectral gap = 2, via Walsh characters): the
+     character-sum derivation is correct and elementary.
+   - Lemma 3 (Cheeger-type crossing bound, `x = (s/N)1 + y` decomposition):
+     correct — relies on the top eigenspace of `Cay(H,B)=Q_r` having
+     multiplicity 1 (true: `r-2|T|=r` only at `T=∅`), which is what licenses
+     bounding `y^TAy` by `λ_2‖y‖²`.
+   - Main theorem composition (`D·|∂_G S| ≥ e_{Q_r}(S,H\S) ≥ 4n_c/9`):
+     correct chaining, `D`-regularity of `G` restricted to a component holds
+     because `M ⊆ H` by construction so neighbors never leave the coset.
+   - §7 treewidth corollary: the `ε=1/6` fix for the greedy-overshoot gap
+     (worst case a component-accumulation construction lands in
+     `[n_c/3, 5n_c/6)` ⊂ `[n_c/6, 5n_c/6]`) is valid and appropriately
+     conservative.
+   - §8's explicit refusal to claim the `Ω(n^{3-o(1)})` arithmetic-cost
+     consequence (the bead description's motivating context, not its literal
+     acceptance criterion) is the right call — the hereditary-separator gap
+     it names is real, not a formality.
+2. **Re-ran the computational due-diligence script**:
+   ```
+   uv run python sandbox-handoffs/certkit-kjy-proof-verify.py
+   ```
+   Result: `PASS -- 0 failing check(s) across facts 1,2,3,3b,5` — 87,380
+   exact hypercube eigen-relation checks (r=1..8), 65,792 exhaustive Cheeger
+   crossing-bound checks (r=3,4) plus 15,000 random-sampled checks (r=6,8,10,
+   no violations), basis-subset verification across all 8 `families.py`
+   families × q=4..10, and the 16-instance (8 families × q=6,8) true-min-vs-
+   predicted-floor cross-check, all `OK`.
+3. **Full test suite**:
+   ```
+   uv run pytest tests
+   ============================= 165 passed in 23.42s =============================
+   ```
+4. **No-dependency checker** (no `uv`, no venv, bare interpreter — this
+   container has no system `python3`, so used the uv-managed interpreter
+   directly, first confirming `import numpy` fails on it):
+   ```
+   /home/node/.local/share/uv/python/cpython-3.12.13-linux-aarch64-gnu/bin/python3.12 \
+       -c "import numpy"
+   # ModuleNotFoundError: No module named 'numpy'  -- confirms zero third-party packages
+   /home/node/.local/share/uv/python/cpython-3.12.13-linux-aarch64-gnu/bin/python3.12 \
+       -m certkit.cli check examples/sample/certificate.json examples/sample/operator.json -v
+   VERIFIED  lambda_min_enclosure via temple_inertia  [-3.095316431033709, -3.0953164248430762]
+     re-derived: [-3.0953164279384016, -3.095316427938384]
+   ```
+
+No verdict on any certificate changed — this bead is pure math, no
+`certkit/` code was touched by either session.
+
+## Verdict
+
+Acceptance criteria met via the "Either" branch's first option in full: a
+written, computationally-verified proof of `Ω(n/polylog n)` balanced-vertex-
+separator / treewidth lower bound, covering **both** named families
+(geometrically-k-local and JW-mapped electronic structure) under one
+argument — not merely reducing JW to a named open sub-question, which the
+bead allowed but didn't require. Closed `certkit-kjy` with `bd close
+--reason=...` recording this verification chain in the bead's notes/reason
+rather than only here.
+
+## What I decided not to do, and why
+
+- **Did not re-derive or second-guess the Robertson-Seymour separator lemma
+  cited in §7.** It's standard graph-minors-era theory, correctly cited, and
+  re-deriving it wouldn't add confidence proportional to the effort — my
+  job this session was verifying the *novel* content (the Cayley-graph
+  isoperimetry), which I did check line by line.
+- **Did not attempt the `Ω(n^{3-o(1)})` arithmetic-cost extension flagged in
+  §8 as open.** That's explicitly out of scope for this bead (which asks for
+  the separator/treewidth bound, not the arithmetic-cost consequence) and is
+  a fair candidate for a new bead if someone wants to push further — I did
+  not file one since the previous session already named it clearly in §8 and
+  duplicating that pointer as a new bead wasn't requested.
+- **Did not modify `certkit-kjy-verify.py`** (the earlier, unfinished
+  script whose Fact 4 correctly falsifies a Harper-exact-value hypothesis).
+  It's an honest dead-end record per the previous session's own §9, and nothing
+  in my verification pass gave a reason to touch it.
+
+## What I could not verify
+
+Same three items the original write-up flagged in its own "What I could not
+verify" section (§ below, unchanged) — I re-ran the same random-search
+cross-check (Fact 5) rather than doing an independent exhaustive search, so
+I did not independently improve on "searched min ≥ predicted floor, upper
+bound on the true minimum only." I have no new unverified claims beyond
+what the original author already disclosed.
+
+## Handoff commands (not run — git policy)
+
+The proof files are already committed (`77f2fb8`). This session only
+changed `bd` state (closed `certkit-kjy`, updated notes) and re-exported
+`issues.jsonl`:
+
+```
+git add issues.jsonl
+git commit -m "certkit-kjy: close -- verify and confirm the already-written
+separator/treewidth proof meets acceptance criteria"
+```
+
+---
+
+# (Original proof write-up follows, unmodified except this divider)
+
 ## Status: separator/treewidth lower bound proved for both named families
 
 Both halves of the acceptance criteria's "Either" branch are met without

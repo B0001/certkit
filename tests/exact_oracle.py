@@ -31,9 +31,10 @@ does not look at anything under `tests/`.
 from __future__ import annotations
 
 from fractions import Fraction
-from typing import Sequence
+from typing import Any, Sequence
 
 from certkit.operators import Operator
+from certkit.schema import h2f
 
 
 def dense_rows_to_fractions(rows: Sequence[Sequence[float]]) -> list[list[Fraction]]:
@@ -42,13 +43,26 @@ def dense_rows_to_fractions(rows: Sequence[Sequence[float]]) -> list[list[Fracti
 
 
 def operator_to_fraction_rows(op: Operator) -> list[list[Fraction]]:
-    """Materialise any `Operator` as exact Fraction rows, via `op.row` alone.
+    """Materialise an `Operator` as exact Fraction rows, via `op.row` alone.
 
-    Works across backends (CSR, dense, Pauli-sum, ...) since it only uses row
-    access. Raises ValueError if any entry is a non-degenerate interval
-    (lo != hi) -- that only happens for a backend honestly reporting it
-    cannot supply an exact value, and silently taking `.lo` there would make
-    this "oracle" disagree with the operator it claims to be truth for.
+    Works for any backend whose `row` never *adds* two intervals together --
+    dense and CSR, as used here, since each of their row entries is either a
+    single stored value or absent. Raises ValueError if any entry is a
+    non-degenerate interval (lo != hi) -- that only happens for a backend
+    honestly reporting it cannot supply an exact value, and silently taking
+    `.lo` there would make this "oracle" disagree with the operator it claims
+    to be truth for.
+
+    Does NOT work for `pauli_sum_real`: `PauliSumReal.row` combines same-
+    column contributions from different Pauli terms with interval addition,
+    and `Iv.__add__` widens outward by a ULP on *every* call regardless of
+    whether the underlying float sum happens to be exact (`interval.py`'s
+    `_widen`) -- deliberate conservatism for the trusted checker, not
+    sloppiness, but it means a row with more than one contribution to the
+    same entry is never Iv-degenerate even when the true sum is an exact
+    dyadic rational like -1.0 + -1.0. Use `pauli_sum_to_fraction_rows`
+    instead, which sums the term coefficients directly in `Fraction` and
+    never goes through `Iv` at all.
     """
     n = op.n
     out = [[Fraction(0)] * n for _ in range(n)]
@@ -61,6 +75,52 @@ def operator_to_fraction_rows(op: Operator) -> list[list[Fraction]]:
                 )
             out[i][j] = Fraction(v.lo)
     return out
+
+
+def pauli_sum_to_fraction_rows(enc: dict[str, Any]) -> list[list[Fraction]]:
+    """Exact Fraction rows for a `pauli_sum_real` operator encoding.
+
+    Recomputes the same bit-mask/phase logic `PauliSumReal.__init__`/`.row`
+    (certkit/operators.py) use to turn a Pauli string into a signed diagonal
+    shift or off-diagonal flip, but sums directly in `Fraction` from the
+    start instead of going through `Iv`. `Fraction(coeff)` is exact -- a
+    Python float is a dyadic rational, and `Fraction.__new__` from a float is
+    an exact conversion, not a decimal approximation -- so the result is the
+    true operator to the last bit, independent of `Iv`'s conservative
+    widening (see `operator_to_fraction_rows` for why that widening makes it
+    unusable here). Cross-checked against an explicit Kronecker-product
+    construction of the same terms (independent of both this function and
+    `PauliSumReal`) while developing this oracle.
+
+    `enc` is the plain-dict encoding (`certkit.operators.encode_pauli`'s
+    output, e.g. `producer.tfim_hamiltonian`'s return value), not a decoded
+    `Operator` -- there is no `Iv` anywhere in this path.
+    """
+    qubits = enc["qubits"]
+    n = 1 << qubits
+    compiled = []
+    for t in enc["terms"]:
+        coeff = h2f(t["coeff"])
+        s = t["string"]
+        mask = zy = ny = 0
+        for k, p in enumerate(s):
+            bit = 1 << k
+            if p in ("X", "Y"):
+                mask |= bit
+            if p in ("Z", "Y"):
+                zy |= bit
+            if p == "Y":
+                ny += 1
+        sign = -1 if (ny // 2) % 2 else 1
+        compiled.append((Fraction(coeff) * sign, mask, zy))
+
+    rows = [[Fraction(0)] * n for _ in range(n)]
+    for i in range(n):
+        for c, mask, zy in compiled:
+            j = i ^ mask
+            term = -c if bin(j & zy).count("1") & 1 else c
+            rows[i][j] += term
+    return rows
 
 
 def exact_count_below(rows: Sequence[Sequence[Fraction]], beta: Fraction) -> int:

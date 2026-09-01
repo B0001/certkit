@@ -504,6 +504,30 @@ milestone in itself, and the interval-arithmetic layer is the one after that.
   producer pays, never a soundness gap the checker has (certkit-487).
 - The forward-enclosure routes still grow, and still abstain rather than rounding
   a pivot to a sign. They remain the only option above bandwidth 1.
+- **The checker is pure Python, and that cost is concentrated in `Iv` itself,
+  not in the code that calls it (`certkit-ryd`).** `sturm`'s O(n b²) forward
+  route is the one to worry about: cProfile on `count_eigenvalues_below_banded`
+  (n=2000, b=64, no zero-crossing pivots) puts ~85% of wall time inside
+  `Iv.__mul__` / `Iv._widen` / `Iv.__init__` (frozen-dataclass construction,
+  NaN/ordering validation, two `math.nextafter` calls per op) — `banded.py`'s
+  own dict-based pivot bookkeeping is ~4%. Measured wall-clock (CPython 3.12,
+  no third-party packages, `sandbox-handoffs/certkit-ryd-bench.py`), all with
+  β chosen so no pivot straddles zero: b=1 (tridiagonal) reaches n=200,000 in
+  0.84s; b=16 reaches n=20,000 in 4.7s; b=64 (`MAX_BANDWIDTH`) reaches
+  n=10,000 in 34s, and the measured O(n) scaling at fixed b puts n=200,000 at
+  ~11 minutes. So a bandwidth around 19–20 is where n=200,000 crosses the
+  original "60 seconds" estimate — badly optimistic for `MAX_BANDWIDTH=64`,
+  badly pessimistic for tridiagonal, where `sturm_be` (plain floats in the hot
+  loop, O(1) `Iv` work per row for the error bound) is the practical route
+  anyway and takes 2.1s at n=200,000. Not fixed, and `interval.py` was not
+  touched to chase it: the only levers that would move the ~85% figure are a
+  compiled hot loop — the trust-boundary-widening move this bead's own
+  description already declines — or edits to `interval.py`'s representation
+  or validation, and that file is one of the two (`certkit-jcb`) still waiting
+  on an independent human review of its derivations that has not happened;
+  adding unreviewed performance-motivated changes to it before that review is
+  the wrong order of operations. This is a measured ceiling on how far
+  pure-Python `Iv` arithmetic goes, not an oversight.
 - `DENSE_LIMIT = 256` — interval LDLᵀ is cubic in pure Python, so above that
   the tight route declines rather than running for an hour. Raised from 160
   (certkit-l7r): this was measured to be a runtime cap, not a soundness cap
