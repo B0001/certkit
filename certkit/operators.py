@@ -383,6 +383,19 @@ def _decode_csr(obj: Any) -> SparseCSRSymmetric:
     require(indptr[0] == 0 and indptr[-1] == len(data), "indptr does not span data")
     require(all(indptr[i] <= indptr[i + 1] for i in range(n)), "indptr not monotone")
     require(all(0 <= j < n for j in indices), "column index out of range")
+    # Canonical CSR: strictly increasing columns per row, so no column appears
+    # twice. Duplicates would be summed in float by `check_symmetric` but in
+    # interval arithmetic by `row()`, and where the float sum rounds the two
+    # disagree -- an operator that passes the symmetry gate while the matrix
+    # the inertia routes reason about is not symmetric (certkit-gh2).
+    require(
+        all(
+            indices[k] < indices[k + 1]
+            for i in range(n)
+            for k in range(indptr[i], indptr[i + 1] - 1)
+        ),
+        "CSR column indices are not strictly increasing within a row",
+    )
     return SparseCSRSymmetric(n, indptr, indices, [h2f(v) for v in data])
 
 

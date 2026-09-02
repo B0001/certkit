@@ -152,6 +152,22 @@ def test_malformed_csr_is_rejected():
             decode_operator(bad)
 
 
+def test_duplicate_csr_column_defeats_the_symmetry_check():
+    """certkit-gh2: repeated columns are summed in float by `check_symmetric`
+    but in interval arithmetic by `row()`. Where the float sum rounds, the gate
+    passes on a matrix the inertia routes -- which read only the lower triangle
+    -- would treat as symmetric when it is not.
+
+    fl(1.0 + 2^-53) == 1.0 mirrors the single 1.0 at (1,0); the true entry is
+    1 + 2^-53. Canonical CSR (strictly increasing columns) forbids it outright.
+    """
+    tiny = 2.0**-53
+    assert 1.0 + tiny == 1.0 and tiny != 0.0  # the rounding the attack rides on
+    dup = encode_csr(2, [0, 3, 5], [0, 1, 1, 0, 1], [2.0, 1.0, tiny, 1.0, 2.0])
+    with pytest.raises(SchemaError):
+        decode_operator(dup)
+
+
 def test_encodings_of_the_same_matrix_have_different_refs():
     """The reference binds the *encoding*, not the abstract operator.
 
