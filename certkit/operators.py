@@ -406,7 +406,13 @@ def _decode_pauli(obj: Any) -> PauliSumReal:
     out = []
     for t in terms:
         require(isinstance(t, dict), "malformed Pauli term")
-        out.append((h2f(t.get("coeff")), t.get("string")))
+        string = t.get("string")
+        # Checked here, not in `check_symmetric`: `PauliSumReal.__init__`
+        # iterates the string, and `decode_operator` constructs before it
+        # checks, so a non-string escapes as TypeError rather than SchemaError
+        # and crashes `check()` instead of abstaining (certkit-be4).
+        require(isinstance(string, str), "Pauli string is not a string")
+        out.append((h2f(t.get("coeff")), string))
     return PauliSumReal(q, out)
 
 

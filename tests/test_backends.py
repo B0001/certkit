@@ -168,6 +168,27 @@ def test_duplicate_csr_column_defeats_the_symmetry_check():
         decode_operator(dup)
 
 
+def test_non_string_pauli_string_abstains_rather_than_crashing():
+    """certkit-be4: `PauliSumReal.__init__` iterates the string before
+    `check_symmetric` validates it, so a non-string used to escape as TypeError
+    past `_verify`'s except clauses and crash `check()` instead of abstaining.
+    """
+    from certkit.checker import check
+    from certkit.operators import operator_ref
+    from certkit.schema import seal
+
+    bad = {"kind": "pauli_sum_real", "qubits": 2,
+           "terms": [{"coeff": "0x1.0p+0", "string": 7}]}
+    with pytest.raises(SchemaError):
+        decode_operator(bad)
+
+    cert = seal({"schema": "certkit/1",
+                 "claim": {"kind": "spectrum_lower_bound",
+                           "operator_ref": operator_ref(bad)},
+                 "witness": {"rule": "gershgorin"}})
+    assert check(cert, bad).status == "ABSTAIN"
+
+
 def test_encodings_of_the_same_matrix_have_different_refs():
     """The reference binds the *encoding*, not the abstract operator.
 
