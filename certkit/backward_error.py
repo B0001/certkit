@@ -44,7 +44,8 @@ is an exact factorisation of ``Atilde - beta I``, and by Sylvester's law the
 number of negative ``d_j`` is the number of eigenvalues of ``Atilde`` strictly
 below beta. The row sums of ``A - Atilde`` are computed directly, giving
 
-    delta >= ||A - Atilde||_2      (via ||E||_2 <= ||E||_inf for symmetric E)
+    delta >= ||A - Atilde||_2      (via ||E||_2 <= ||E||_inf for symmetric E,
+                                     Certkit.Soundness.l2_opNorm_le_rowSum_of_isHermitian)
 
 Weyl then gives, for every k, ``|lambda_k(A) - lambda_k(Atilde)| <= delta``.
 

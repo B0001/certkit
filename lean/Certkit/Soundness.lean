@@ -2,13 +2,24 @@
   certkit -- soundness obligations, stated in Lean 4 / mathlib4.
 
   STATUS: compiles clean against the pinned mathlib (see lake-manifest.json).
-  Six of the seven theorems below are real, zero-`sorry` proofs:
-  `rayleigh_ritz_min`, `inertia_count_below`, `gershgorin_lower`,
-  `temple_lower`, `weyl_shift`, and `sweep_backward_bound` (that last one has
-  its own doc comment on exactly what it does and does not cover). Only
-  `residual_encloses_some_eigenvalue` is still `sorry`: a specification of
-  intent, not a verified artifact. Do not read this file as
-  "soundness-complete."
+  All eight theorems below are real, zero-`sorry` proofs: `rayleigh_ritz_min`,
+  `inertia_count_below`, `gershgorin_lower`, `temple_lower`, `weyl_shift`,
+  `residual_encloses_some_eigenvalue`, `l2_opNorm_le_rowSum_of_isHermitian`,
+  and `sweep_backward_bound`. The last two each have their own doc comment on
+  exactly what they do and do not cover -- in particular `sweep_backward_bound`'s
+  doc comment flags a specific, still-uncovered gap: that the row-sums
+  `backward_error.sweep` accumulates at runtime actually dominate
+  `‖A - Atilde‖_∞`, an `Iv`-arithmetic bookkeeping fact about that Python
+  loop rather than a Lean obligation. (The norm-inequality half of that
+  gap -- `‖·‖_∞` dominating the `‖·‖_2` `weyl_shift` is stated against --
+  is closed by `l2_opNorm_le_rowSum_of_isHermitian`.) Every theorem
+  compiling with no `sorry` is a fact about this file;
+  it is not the same claim as "the checker is proved sound end-to-end" --
+  that also requires the Python side to actually implement what each theorem
+  states (see the correspondence table below) and requires `lake build
+  Certkit` to succeed for the project as a whole, which is checked
+  separately from any one theorem. Do not read this file as
+  "soundness-complete" without checking both.
 
   The point of the file is the correspondence. The Python checker performs
   exactly two mathematical steps, and each is one theorem here:
@@ -19,6 +30,7 @@
     banded.count_eigenvalues_below_banded           <->  inertia_count_below
     backward_error.count_eigenvalues_below_backward <->  inertia_count_below
                                                      +   weyl_shift
+                                                     +   l2_opNorm_le_rowSum_of_isHermitian
     checker._rule_gershgorin_rayleigh  lower bound  <->  gershgorin_lower
 
   A third obligation -- that interval arithmetic on doubles encloses the
@@ -202,7 +214,56 @@ theorem rayleigh_ritz_min (x : n → ℝ) (hx : x ≠ 0) :
     claim kind (`spectrum_contains`) precisely to stop that conflation. -/
 theorem residual_encloses_some_eigenvalue (x : n → ℝ) (hx : x ≠ 0) :
     ∃ i, |hA.eigenvalues i - rayleigh A x| ≤ residualNorm A x := by
-  sorry
+  obtain ⟨i₁, -⟩ := Function.ne_iff.mp hx
+  set μ := rayleigh A x with hμ
+  set U : Matrix n n ℝ := (hA.eigenvectorUnitary : Matrix n n ℝ) with hU
+  have hUUt : U * Uᵀ = 1 := by
+    rw [hU, ← Matrix.conjTranspose_eq_transpose_of_trivial, ← Matrix.star_eq_conjTranspose]
+    exact Unitary.coe_mul_star_self hA.eigenvectorUnitary
+  have hUtU : Uᵀ * U = 1 := by
+    rw [hU, ← Matrix.conjTranspose_eq_transpose_of_trivial, ← Matrix.star_eq_conjTranspose]
+    exact Unitary.coe_star_mul_self hA.eigenvectorUnitary
+  set y : n → ℝ := Uᵀ *ᵥ x with hy
+  have hxy : U *ᵥ y = x := by
+    rw [hy, Matrix.mulVec_mulVec, hUUt, Matrix.one_mulVec]
+  have horth : ∀ v : n → ℝ, (U *ᵥ v) ⬝ᵥ (U *ᵥ v) = v ⬝ᵥ v := by
+    intro v
+    rw [dotProduct_mulVec, ← Matrix.mulVec_transpose, Matrix.mulVec_mulVec, hUtU,
+      Matrix.one_mulVec]
+  have hxx : x ⬝ᵥ x = ∑ i, (y i) ^ 2 := by
+    rw [← hxy, horth, dotProduct]
+    exact Finset.sum_congr rfl fun i _ => (sq (y i)).symm
+  have hr : A *ᵥ x - μ • x = U *ᵥ (Matrix.diagonal (fun i => hA.eigenvalues i - μ) *ᵥ y) := by
+    have h1 : A *ᵥ x - μ • x = (A - μ • (1 : Matrix n n ℝ)) *ᵥ x := by
+      rw [Matrix.sub_mulVec, Matrix.smul_mulVec, Matrix.one_mulVec]
+    rw [h1, sub_smul_one_eq_mul_diagonal_mul_transpose hA μ, ← Matrix.mulVec_mulVec,
+      ← Matrix.mulVec_mulVec, ← hy, ← hU]
+  have hrr : (A *ᵥ x - μ • x) ⬝ᵥ (A *ᵥ x - μ • x)
+      = ∑ i, (hA.eigenvalues i - μ) ^ 2 * (y i) ^ 2 := by
+    rw [hr, horth, dotProduct]
+    refine Finset.sum_congr rfl fun i _ => ?_
+    rw [Matrix.mulVec_diagonal]
+    ring
+  obtain ⟨i₀, -, hmin⟩ :=
+    Finset.exists_min_image Finset.univ (fun i => |hA.eigenvalues i - μ|) ⟨i₁, Finset.mem_univ i₁⟩
+  refine ⟨i₀, ?_⟩
+  set d := |hA.eigenvalues i₀ - μ| with hd
+  have hbound : d ^ 2 * (x ⬝ᵥ x) ≤ (A *ᵥ x - μ • x) ⬝ᵥ (A *ᵥ x - μ • x) := by
+    rw [hrr, hxx, Finset.mul_sum]
+    refine Finset.sum_le_sum fun i _ => ?_
+    have h1 : d ^ 2 ≤ (hA.eigenvalues i - μ) ^ 2 := by
+      rw [hd, ← sq_abs (hA.eigenvalues i - μ)]
+      exact pow_le_pow_left₀ (abs_nonneg _) (hmin i (Finset.mem_univ i)) 2
+    nlinarith [sq_nonneg (y i)]
+  have hxx_pos : 0 < x ⬝ᵥ x := by
+    simpa [star_trivial] using (Matrix.dotProduct_self_star_pos_iff (v := x)).mpr hx
+  show d ≤ residualNorm A x
+  unfold residualNorm
+  rw [← hμ, le_div_iff₀ (Real.sqrt_pos.mpr hxx_pos)]
+  have hdsqrt : d * Real.sqrt (x ⬝ᵥ x) = Real.sqrt (d ^ 2 * (x ⬝ᵥ x)) := by
+    rw [Real.sqrt_mul (sq_nonneg d), Real.sqrt_sq (by rw [hd]; exact abs_nonneg _)]
+  rw [hdsqrt]
+  exact Real.sqrt_le_sqrt hbound
 
 /-- **Temple's inequality.** Given a separator `β` that sits strictly above
     the Rayleigh quotient and weakly below the second eigenvalue, the
@@ -586,8 +647,9 @@ private lemma weyl_abs_inner_toEuclideanLin_le (M : Matrix n n ℝ) (x : Euclide
     induced by identifying a matrix with the continuous linear map it gives on
     `EuclideanSpace` -- the classical spectral norm Weyl's inequality is stated
     against). It is *not* the entrywise/row-sum bound `sturm_be` actually
-    computes at runtime; relating the two remains a separate obligation,
-    covered by `sweep_backward_bound`'s doc comment below, not by this
+    computes at runtime; relating the two is a separate obligation, proved
+    below as `l2_opNorm_le_rowSum_of_isHermitian` (for Hermitian matrices,
+    the L² operator norm is bounded by the row-sum norm), not by this
     theorem.
 
     Proved from mathlib primitives via the `CourantFischer` section above:
@@ -620,6 +682,110 @@ theorem weyl_shift {B : Matrix n n ℝ} (hB : B.IsHermitian) (i : n) :
       ((Fintype.equivOfCardEq (Fintype.card_fin (Fintype.card n))).symm i) = hB.eigenvalues i := rfl
   rwa [heqA, heqB] at hw
 
+/-- **Row-sum dominates the L² operator norm, for symmetric matrices.** This
+    is the gap `weyl_shift`'s doc comment above and `sweep_backward_bound`'s
+    doc comment below both flag as open: `sturm_be` bounds the perturbation
+    `E := A - Atilde` from the entries via a row sum `∑ j, |E i j|` (the
+    operator norm mathlib calls `Matrix.linfty_opNNNorm_def`; spelled out
+    here directly rather than opened as its own scoped norm instance, since
+    that scope's `‖·‖` notation would clash with `Matrix.Norms.L2Operator`,
+    already open in this section), while `weyl_shift` needs that bound
+    against the L² operator norm. `backward_error.py`'s module docstring
+    asserts the link in one line -- `delta >= ‖A - Atilde‖_2 (via ‖E‖_2 ≤
+    ‖E‖_inf for symmetric E)` -- and this theorem is that assertion, proved.
+
+    Assumes `[Nonempty n]` only so the row-sum bound `M` can be taken as a
+    `Finset.sup'` (which needs a witness element) instead of detouring
+    through `ℝ≥0`; every real use of this theorem is a tridiagonal sweep
+    with `n ≥ 1`, so nothing is lost.
+
+    **Proof (Schur test).** Let `M` bound every row sum. For any `x`,
+    Cauchy-Schwarz on row `i` (weighted by `|E i j|`) gives
+    `(∑ j, |E i j| * |x j|) ^ 2 ≤ (∑ j, |E i j|) * ∑ j, |E i j| * x j ^ 2
+                                 ≤ M * ∑ j, |E i j| * x j ^ 2`,
+    and the triangle inequality bounds `|(E x) i|` by that same LHS. Summing
+    over `i` and swapping the order of summation turns the inner sum into a
+    sum over columns weighted by `∑ i, |E i j|`, which by symmetry
+    (`E i j = E j i`, from `hE`) is itself a row sum and so also `≤ M`. This
+    gives `‖E x‖ ^ 2 ≤ M ^ 2 * ‖x‖ ^ 2`, i.e. `‖E x‖ ≤ M * ‖x‖` for every `x`
+    -- exactly the defining bound on the operator norm. No numeric constant
+    is transcribed: the classical fact used is `‖E‖_1 = ‖E‖_∞` for symmetric
+    `E` (row sums equal column sums) combined with the interpolation bound
+    `‖E‖_2 ≤ sqrt (‖E‖_1 * ‖E‖_∞)`, done directly via Cauchy-Schwarz rather
+    than via a named interpolation theorem, since mathlib does not carry one
+    for finite matrices. -/
+theorem l2_opNorm_le_rowSum_of_isHermitian [Nonempty n] {E : Matrix n n ℝ}
+    (hE : E.IsHermitian) :
+    ‖E‖ ≤ (Finset.univ : Finset n).sup' Finset.univ_nonempty (fun i => ∑ j, |E i j|) := by
+  set M : ℝ := (Finset.univ : Finset n).sup' Finset.univ_nonempty (fun i => ∑ j, |E i j|)
+    with hM_def
+  have hMi : ∀ i, ∑ j, |E i j| ≤ M := fun i => by
+    rw [hM_def]; exact Finset.le_sup' (f := fun i => ∑ j, |E i j|) (Finset.mem_univ i)
+  have hM0 : 0 ≤ M :=
+    le_trans (Finset.sum_nonneg fun j _ => abs_nonneg _) (hMi (Classical.arbitrary n))
+  have hsymm : ∀ i j, E i j = E j i := fun i j => by
+    have h := hE.apply i j; simp only [star_trivial] at h; exact h.symm
+  have hcol : ∀ j, ∑ i, |E i j| ≤ M := fun j => by
+    have heq : (∑ i, |E i j|) = ∑ i, |E j i| :=
+      Finset.sum_congr rfl fun i _ => by rw [hsymm i j]
+    rw [heq]; exact hMi j
+  rw [← Matrix.l2_opNorm_toEuclideanCLM]
+  refine ContinuousLinearMap.opNorm_le_bound _ hM0 fun x => ?_
+  set y : EuclideanSpace ℝ n → n → ℝ := fun z i => (toEuclideanCLM (n := n) (𝕜 := ℝ) E z) i
+    with hy_def
+  have hEx : y x = fun i => ∑ j, E i j * x j := by
+    funext i
+    show ((toEuclideanCLM (n := n) (𝕜 := ℝ) E) x).ofLp i = ∑ j, E i j * x j
+    rw [ofLp_toEuclideanCLM, Matrix.mulVec_apply_eq_sum]
+  have hrow : ∀ i, |y x i| ^ 2 ≤ (∑ j, |E i j|) * ∑ j, |E i j| * x j ^ 2 := by
+    intro i
+    have hxi : y x i = ∑ j, E i j * x j := congrFun hEx i
+    rw [hxi]
+    calc |∑ j, E i j * x j| ^ 2
+        ≤ (∑ j, |E i j * x j|) ^ 2 := by
+          gcongr
+          exact Finset.abs_sum_le_sum_abs _ _
+      _ = (∑ j, |E i j| * |x j|) ^ 2 := by simp [abs_mul]
+      _ ≤ (∑ j, |E i j|) * ∑ j, |E i j| * x j ^ 2 := by
+          have hcs := Finset.sum_mul_sq_le_sq_mul_sq (Finset.univ : Finset n)
+            (fun j => Real.sqrt |E i j|) (fun j => Real.sqrt |E i j| * |x j|)
+          have heq1 : ∀ j, Real.sqrt |E i j| * (Real.sqrt |E i j| * |x j|) = |E i j| * |x j| :=
+            fun j => by rw [← mul_assoc, Real.mul_self_sqrt (abs_nonneg _)]
+          have heq2 : ∀ j, Real.sqrt |E i j| ^ 2 = |E i j| := fun j => Real.sq_sqrt (abs_nonneg _)
+          have heq3 : ∀ j, (Real.sqrt |E i j| * |x j|) ^ 2 = |E i j| * x j ^ 2 := fun j => by
+            rw [mul_pow, heq2, sq_abs]
+          simpa only [heq1, heq2, heq3] using hcs
+  have hsum : ∑ i, |y x i| ^ 2 ≤ M * ∑ j, x j ^ 2 * ∑ i, |E i j| :=
+    calc ∑ i, |y x i| ^ 2
+        ≤ ∑ i, (∑ j, |E i j|) * ∑ j, |E i j| * x j ^ 2 := Finset.sum_le_sum fun i _ => hrow i
+      _ ≤ ∑ i, M * ∑ j, |E i j| * x j ^ 2 := by
+          refine Finset.sum_le_sum fun i _ => ?_
+          gcongr
+          exact hMi i
+      _ = M * ∑ i, ∑ j, |E i j| * x j ^ 2 := by rw [Finset.mul_sum]
+      _ = M * ∑ j, ∑ i, |E i j| * x j ^ 2 := by rw [Finset.sum_comm]
+      _ = M * ∑ j, x j ^ 2 * ∑ i, |E i j| := by
+          congr 1
+          refine Finset.sum_congr rfl fun j _ => ?_
+          rw [← Finset.sum_mul, mul_comm]
+  have hMx : ∑ j, x j ^ 2 * ∑ i, |E i j| ≤ M * ∑ j, x j ^ 2 := by
+    calc ∑ j, x j ^ 2 * ∑ i, |E i j|
+        ≤ ∑ j, x j ^ 2 * M :=
+          Finset.sum_le_sum fun j _ => mul_le_mul_of_nonneg_left (hcol j) (sq_nonneg _)
+      _ = M * ∑ j, x j ^ 2 := by rw [← Finset.sum_mul, mul_comm]
+  have goal_sq : ‖toEuclideanCLM (n := n) (𝕜 := ℝ) E x‖ ^ 2 ≤ (M * ‖x‖) ^ 2 := by
+    have hxnorm : ‖toEuclideanCLM (n := n) (𝕜 := ℝ) E x‖ ^ 2 = ∑ i, |y x i| ^ 2 := by
+      rw [EuclideanSpace.real_norm_sq_eq]
+      exact Finset.sum_congr rfl fun i _ => (sq_abs _).symm
+    rw [hxnorm, mul_pow, EuclideanSpace.real_norm_sq_eq x]
+    calc ∑ i, |y x i| ^ 2 ≤ M * ∑ j, x j ^ 2 * ∑ i, |E i j| := hsum
+      _ ≤ M * (M * ∑ j, x j ^ 2) := by gcongr
+      _ = M ^ 2 * ∑ i, x i ^ 2 := by ring
+  calc ‖toEuclideanCLM (n := n) (𝕜 := ℝ) E x‖
+      = Real.sqrt (‖toEuclideanCLM (n := n) (𝕜 := ℝ) E x‖ ^ 2) := (Real.sqrt_sq (norm_nonneg _)).symm
+    _ ≤ Real.sqrt ((M * ‖x‖) ^ 2) := Real.sqrt_le_sqrt goal_sq
+    _ = M * ‖x‖ := Real.sqrt_sq (mul_nonneg hM0 (norm_nonneg _))
+
 /-- **The per-step rounding collection**, formalised and proved in
     `Certkit.BackwardError` (`sweep_step_backward_bound`): given the
     one-rounding-per-operation model (each of a sweep step's four operations
@@ -636,11 +802,12 @@ theorem weyl_shift {B : Matrix n n ℝ} (hB : B.IsHermitian) (i : n) :
     original framing -- that the row-sums `sweep` accumulates from these
     factors actually dominate `‖A - Atilde‖_∞` (an `Iv`-arithmetic
     bookkeeping fact about `backward_error.sweep`'s Python loop, not part of
-    the one-rounding algebra) and that `‖·‖_∞` dominates the operator norm
-    `‖·‖_2` used by `weyl_shift` above (a general Hermitian-matrix norm
-    inequality, unrelated to rounding). Those remain open, covered by
-    `weyl_shift`'s own `sorry` and by the Python test suite, not by this
-    theorem. -/
+    the one-rounding algebra). That the row-sum norm `‖·‖_∞` in turn dominates
+    the operator norm `‖·‖_2` used by `weyl_shift` above is a separate,
+    general Hermitian-matrix norm inequality, unrelated to rounding -- it is
+    proved above as `l2_opNorm_le_rowSum_of_isHermitian`, not by this
+    theorem. Only the `Iv`-arithmetic bookkeeping fact remains open here,
+    covered by the Python test suite, not by this theorem. -/
 theorem sweep_backward_bound {u e0 e1 e2 e3 a beta bprev dprev : ℝ}
     (hu : 0 ≤ u) (hu1 : u ≤ 1 / 32)
     (h0 : |e0| ≤ u) (h1 : |e1| ≤ u) (h2 : |e2| ≤ u) (h3 : |e3| ≤ u) :

@@ -130,7 +130,7 @@ bd prime                # Refresh Beads context
 ## Build & Test
 
 ```bash
-uv run --extra dev pytest tests     # 172 passing
+uv run --extra dev pytest tests     # 182 passing (re-measure — count drifts upward as beads land)
 ```
 
 Use `--extra dev`. An environment missing scipy does not error — `producer._ground_state`

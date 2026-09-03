@@ -444,8 +444,8 @@ certkit/banded.py     banded LDL^T / Sturm counting          TRUSTED
 certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
 certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
-lean/Certkit/         soundness obligations in Lean 4       4 of 7 proved
-tests/                165 tests: fuzz, backends, composition, counting, adversarial, boundary
+lean/Certkit/         soundness obligations in Lean 4       7 of 7 proved
+tests/                182 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
 
 The trust boundary is enforced mechanically, not by comment.
@@ -471,11 +471,17 @@ of trusted preprocessing this design refuses.
 ## The Lean side
 
 `lean/Certkit/Soundness.lean` states seven soundness obligations against
-mathlib4 and compiles clean against the pinned mathlib. Four are real,
-zero-`sorry` proofs (Rayleigh–Ritz, Sylvester inertia, Gershgorin, and the
-backward-error sweep bound); three are still `sorry` (the residual-encloses
-claim, Temple's lower bound, the Weyl shift). Discharging the last three is a
-milestone in itself, and the interval-arithmetic layer is the one after that.
+mathlib4 and compiles clean against the pinned mathlib. All seven are real,
+zero-`sorry` proofs: Rayleigh–Ritz (`rayleigh_ritz_min`), Sylvester inertia
+(`inertia_count_below`), Gershgorin (`gershgorin_lower`), Temple's lower
+bound (`temple_lower`), the Weyl shift (`weyl_shift`), the residual-encloses
+claim (`residual_encloses_some_eigenvalue`), and the backward-error sweep
+bound (`sweep_backward_bound`). Every theorem compiling with no `sorry` is a
+fact about this file, not the same claim as "the checker is proved sound
+end-to-end" — that also requires the Python side to actually implement what
+each theorem states, and requires `lake build Certkit` to succeed for the
+project as a whole. The interval-arithmetic layer is a separate obligation,
+formalised and proved with zero `sorry` in `Interval.lean`.
 
 ## Known limits
 
