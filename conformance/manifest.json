@@ -1,0 +1,68 @@
+{
+  "schema": "certkit/1",
+  "cases": [
+    {
+      "name": "verified_dense_lambda_min",
+      "expect": "VERIFIED",
+      "note": "Baseline. A correct lambda_min enclosure on a 6x6 dense symmetric operator."
+    },
+    {
+      "name": "verified_composed_bundle",
+      "expect": "VERIFIED",
+      "note": "A temple certificate discharging its gap hypothesis via a referenced count certificate."
+    },
+    {
+      "name": "abstain_enclosure_shrunk",
+      "expect": "ABSTAIN",
+      "reason_contains": "tighter",
+      "note": "The witness does not support the claim: a point claim tighter than the re-derived enclosure."
+    },
+    {
+      "name": "abstain_enclosure_shifted",
+      "expect": "ABSTAIN",
+      "note": "Enclosure moved off the true eigenvalue; re-derivation does not support it."
+    },
+    {
+      "name": "abstain_unsealed_mutation",
+      "expect": "ABSTAIN",
+      "note": "Body mutated without re-sealing. The content hash must catch this before any mathematics runs."
+    },
+    {
+      "name": "abstain_witness_tampered",
+      "expect": "ABSTAIN",
+      "note": "Witness vector replaced with zeros; the claim no longer follows from it."
+    },
+    {
+      "name": "abstain_operator_substituted",
+      "expect": "ABSTAIN",
+      "reason_contains": "operator",
+      "note": "A valid certificate checked against a different operator must not verify."
+    },
+    {
+      "name": "abstain_unknown_rule",
+      "expect": "ABSTAIN",
+      "note": "Unknown rule names are refused, never ignored."
+    },
+    {
+      "name": "abstain_garbage_input",
+      "expect": "ABSTAIN",
+      "note": "Malformed input abstains rather than crashing."
+    },
+    {
+      "name": "abstain_dependency_missing",
+      "expect": "ABSTAIN",
+      "reason_contains": "not in the bundle",
+      "note": "Broken dependency: the temple certificate's referenced count certificate is absent."
+    },
+    {
+      "name": "abstain_forged_cycle",
+      "expect": "ABSTAIN",
+      "note": "A cycle, buildable only by lying about content hashes. Traversal refuses regardless."
+    },
+    {
+      "name": "abstain_self_reference",
+      "expect": "ABSTAIN",
+      "note": "Self-reference is a cycle of length one."
+    }
+  ]
+}

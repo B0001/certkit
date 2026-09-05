@@ -1,0 +1,28 @@
+{
+  "claim": {
+    "enclosure": {
+      "hi": "-0x1.3c10adb3138ccp+1",
+      "lo": "-0x1.3c10adbdae8ecp+1"
+    },
+    "kind": "lambda_min_enclosure",
+    "operator_ref": "blake2b16:bd056f06656550303f576d8c360421dc"
+  },
+  "content_hash": "blake2b16:706ad6d709d3c602407f813ba8dbc06f",
+  "producer": {
+    "backend": "numpy",
+    "name": "certkit.producer"
+  },
+  "schema": "certkit/1",
+  "witness": {
+    "beta": "-0x1.ac47b5981400dp+0",
+    "rule": "temple_inertia",
+    "vector": [
+      "0x1.0aeba3164eb9cp-1",
+      "-0x1.dd826be2d5e8cp-6",
+      "-0x1.05c9fc80886bep-3",
+      "0x1.3d2bac134a9d5p-1",
+      "0x1.33ea638d0c033p-3",
+      "-0x1.1a9c35609ff79p-1"
+    ]
+  }
+}
