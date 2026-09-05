@@ -34,6 +34,7 @@ A producer MAY import, as ordinary library code for its own arithmetic:
 | `certkit.interval` (`Iv`, `IntervalError`) | Rigorous arithmetic is a substrate, not an adjudication. Using it makes the producer's own bounds sound; it does not let the producer grade itself. |
 | `certkit.operators` (`encode_*`, `operator_ref`) | Serialisation of the operator into the exchange format. Format code, not verdict code. |
 | `certkit.schema` (`SCHEMA_VERSION`, `seal`, `f2h`) | Writing a well-formed, sealed certificate is the producer's job. |
+| `certkit.producer.pad_claim` | Public, documented in the README's "Writing a producer" section, and required in practice: the checker re-derives in outward-rounded interval arithmetic, so its enclosure is strictly wider than an exact-float bound and an unpadded claim is always refused. Padding is calibration, not adjudication — over-padding costs coverage, never soundness. |
 
 A producer MUST NOT import:
 
@@ -41,7 +42,7 @@ A producer MUST NOT import:
 |---|---|
 | `certkit.checker` — `check`, `check_bundle`, `bundle_verdict`, `count_eigenvalues_below*`, `Verdict` | This is the adjudication path. Importing it collapses the independence the certificate is for. |
 | Any private name (leading underscore) from any certkit module | A private symbol is not a contract. If a producer needs it, it is missing from the public format and must be added deliberately. |
-| `certkit.producer` internals | Sharing the producer's own conventions with certkit's reference producer means a convention bug is present identically on both sides and cancels. |
+| Any other `certkit.producer` name (`certify_*`, `_`-prefixed helpers) | Those compute claims. A consumer that calls them is not producing its own claim, it is re-exporting certkit's — with nothing independent left to check. |
 
 The rule in one line: **import what computes, never what judges.**
 
@@ -95,16 +96,22 @@ is tracked rather than rediscovered:
    was verified when the bridge was written — so the underlying claims stand;
    what fails the contract is the in-process verdict path, which must become
    a subprocess call.
-2. It imports `_pad` from `certkit.producer` — a private symbol — and uses it
-   to widen the bracket that it then submits for checking. This is the
-   shared-convention failure the contract exists to prevent: if `_pad` is
-   wrong, the producer widens by exactly the amount the checker expects and
-   the error is invisible. Either `_pad` becomes public and specified as part
-   of the format, or the bridge computes its own padding.
+2. It imports `_pad` from `certkit.producer` — a private symbol. This is not
+   a soundness hole: the checker never uses `pad_claim`, it re-derives
+   independently, so a wrong pad causes refusal, not a false verdict. It is a
+   coupling defect, and it had already broken: `_pad` was renamed to the
+   public `pad_claim` in 9dd5f66, after the bridge was written, so the bridge
+   did not import against current certkit at all. A private symbol is not a
+   contract, and this is what that costs.
 
 Neither is a defect in the certificates already emitted. Both are defects in
-the integration path, and both must close before a second consumer copies the
-pattern.
+the integration path.
+
+**Both are fixed** as of the bridge's next commit: the verdict now comes from
+`certkit check` in a subprocess over the written files, and padding uses the
+public `pad_claim`. Re-verified end to end on H2 (width 3.705e-09),
+H4 (1.361e-05) and N2 CAS(6,6) (dim 4096, matrix-free), each with the exact
+eigenvalue inside the enclosure.
 
 ## What this contract does not settle
 
