@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install with producer and dev extras
+        run: pip install -e '.[dev]'
+      - name: Test
+        run: pytest
+
+  # Installs certkit with NO extras, so this job fails if the checker ever
+  # acquires a third-party dependency. dependencies = [] is a load-bearing
+  # claim of this repo (see TCB.md section 2) and nothing else enforces it.
+  # The conformance suite is stdlib-only by design, so it runs here unaided.
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and the ceiling of requires-python. The floor is the claim
+        # that matters: a consumer must be able to check a certificate on a
+        # bare interpreter without matching this repo's environment.
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the checker alone, no extras
+        run: pip install .
+      - name: Assert the checker imports no third-party code
+        run: |
+          python - <<'PY'
+          import sys
+          before = set(sys.modules)          # setuptools/venv machinery loads at startup
+          import certkit.checker             # the import under test
+          bad = sorted(
+              name for name in set(sys.modules) - before
+              if not name.startswith("certkit")
+              and getattr(sys.modules[name], "__file__", None)
+              and ("site-packages" in sys.modules[name].__file__
+                   or "dist-packages" in sys.modules[name].__file__)
+          )
+          assert not bad, "checker pulled in third-party modules: %s" % bad
+          print("checker imports no third-party code")
+          PY
+      - name: Conformance suite against the installed release
+        run: python conformance/run.py --checker certkit
