@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "certkit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Certificate format and independent checker for numerical claims"
 requires-python = ">=3.9"
 dependencies = []          # the checker has none, by design

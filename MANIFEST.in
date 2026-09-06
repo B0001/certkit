@@ -1,0 +1,6 @@
+# The conformance suite is the thing consumers are meant to run against a
+# pinned release, so it must ship in the sdist. Without this it was omitted
+# while tests/ (which needs numpy, and was itself incomplete) was included.
+recursive-include conformance *
+recursive-include tests *.py
+include CHANGELOG.md INTEGRATION.md TCB.md
