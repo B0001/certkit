@@ -240,3 +240,65 @@ def test_unhashed_certificate_still_gets_a_verdict():
 def test_encode_dense_roundtrip_still_matches_after_refactor():
     rows = _matrix(4)
     assert check(*certify_lambda_min(encode_dense(rows))).ok
+
+
+# -- memo keyed by an unauthenticated hash (certkit-jcb item 4) -----------
+def _diag_forgery():
+    """A genuine count cert G, a forgery F carrying G's content_hash with a
+    lying beta, and a Temple node D that only verifies if F's claim is read.
+
+    diag(1, 2, 10): x = e2 is an exact eigenvector for 2, so with beta = 5
+    (two eigenvalues below it, not one) Temple would 'prove' lambda_min in
+    [1.99, 2.01]. True lambda_min is 1.
+    """
+    rows = [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 10.0]]
+    good, enc = certify_count_below(rows, 1.5, 1)
+    forged = copy.deepcopy(good)
+    forged["claim"]["beta"] = f2h(5.0)  # NOT resealed: hash still claims to be `good`
+    temple = copy.deepcopy(certify_lambda_min_composed(rows)[0][1])
+    temple["claim"]["enclosure"] = {"lo": f2h(1.99), "hi": f2h(2.01)}
+    temple["witness"].update(vector=[f2h(0.0), f2h(1.0), f2h(0.0)], beta=f2h(5.0),
+                             gap_ref=good["content_hash"])
+    return good, forged, seal(temple), enc
+
+
+def test_forged_duplicate_hash_cannot_borrow_a_memoised_verdict():
+    """Before the fix, bundle [good, forged, temple] returned a false VERIFIED:
+    good's VERIFIED was memoised under its hash, the index resolved that hash
+    to `forged` (last wins), dep() read forged's claim, and _verify returned
+    the memo hit without ever calling verify_seal on forged."""
+    import itertools
+
+    good, forged, temple, enc = _diag_forgery()
+    seen = set()
+    for perm in itertools.permutations([good, forged, temple]):
+        v = check_bundle(list(perm), [enc])[temple["content_hash"]]
+        assert not v.ok
+        seen.add(v.reason)
+    assert len(seen) == 1  # the dependent's verdict no longer depends on order
+
+
+def test_forged_duplicate_first_does_not_poison_the_genuine_certificate():
+    rows = _matrix()
+    (count_cert, temple), ops = certify_lambda_min_composed(rows)
+    forged = copy.deepcopy(count_cert)
+    forged["claim"]["count"] = 7  # unsealed
+    results = check_bundle([forged, count_cert, temple], ops)
+    assert results[temple["content_hash"]].ok
+
+
+def test_honest_bundle_verdicts_are_order_independent():
+    """Sealed certificates' verdicts cannot depend on traversal context: only
+    temple_ref/combine call dep(), and they can only run at the top level
+    (a dep target must be a leaf kind, and _verify_uncached rejects a rule
+    whose kind differs from the claim's), so the stack is always length 1 and
+    the cycle and MAX_DEPTH checks are unreachable for sealed input."""
+    import itertools
+
+    c1, ops1 = certify_lambda_min_composed(_matrix())
+    c2, ops2 = certify_bounds_composed(_matrix(seed=3))
+    certs, ops = c1 + c2, ops1 + ops2
+    want = check_bundle(certs, ops)
+    assert all(v.ok for v in want.values())
+    for perm in itertools.permutations(certs):
+        assert check_bundle(list(perm), ops) == want

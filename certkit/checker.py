@@ -721,8 +721,22 @@ def _cwitness_vector(witness: dict, op: Operator) -> list[CIv]:
 
 
 # -- core -----------------------------------------------------------------
+def _sealed(cert: Any) -> bool:
+    try:
+        verify_seal(cert)
+        return True
+    except SchemaError:
+        return False
+
+
 def _verify(cert: Any, ctx: Context) -> Verdict:
-    key = cert.get("content_hash") if isinstance(cert, dict) else None
+    # The memo is keyed by content_hash, so the key must be authenticated
+    # BEFORE it is used: otherwise a forged certificate carrying a genuine
+    # certificate's hash reads that certificate's VERIFIED out of the memo
+    # (or poisons it with its own ABSTAIN) without ever reaching verify_seal.
+    # certkit-jcb item 4. An unsealed cert bypasses the memo and abstains in
+    # _verify_uncached on the seal.
+    key = cert.get("content_hash") if _sealed(cert) else None
     if key is not None and key in ctx.memo:
         return ctx.memo[key]
     verdict = _verify_uncached(cert, ctx)
@@ -804,7 +818,7 @@ def check_bundle(certs: Sequence[Any], operator_encodings: Sequence[Any]) -> dic
     index = {
         c["content_hash"]: c
         for c in certs
-        if isinstance(c, dict) and isinstance(c.get("content_hash"), str)
+        if isinstance(c, dict) and isinstance(c.get("content_hash"), str) and _sealed(c)
     }
     memo: dict[str, Verdict] = {}
     out: dict[str, Verdict] = {}

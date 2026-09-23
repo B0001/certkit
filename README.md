@@ -445,7 +445,7 @@ certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
 certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
 lean/Certkit/         soundness obligations in Lean 4       7 of 7 proved
-tests/                182 tests: fuzz, backends, composition, counting, adversarial, boundary
+tests/                185 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
 
 The trust boundary is enforced mechanically, not by comment.
