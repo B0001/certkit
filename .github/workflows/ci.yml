@@ -55,3 +55,12 @@ jobs:
           PY
       - name: Conformance suite against the installed release
         run: python conformance/run.py --checker certkit
+      # TCB.md's platform assumptions (IEEE binary64, no FMA contraction,
+      # correctly rounded sqrt/nextafter), probed exactly; then the checker's
+      # raw output on every conformance case must be bit-identical to the
+      # golden digest recorded on macOS arm64. This runner is x86_64, so a
+      # green run is the cross-architecture evidence certkit-8hn asks for.
+      - name: Probe floating-point platform assumptions
+        run: python tests/probe_platform.py
+      - name: Checker output bit-identical to the arm64 golden digest
+        run: python tests/digest_outputs.py | diff tests/platform_digest.txt -
