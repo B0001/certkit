@@ -247,7 +247,7 @@ one:
 ```
 inertia    full interval LDL^T                       O(n^3), dense only
 sturm      interval LDL^T that stays inside the band O(n b^2)
-sturm_be   float sweep + a runtime backward bound    O(n), tridiagonal
+sturm_be   float sweep + a runtime backward bound    O(n b^2), any bandwidth
 ```
 
 The first two track a forward enclosure of every pivot. The Sturm recurrence
@@ -257,20 +257,35 @@ n ≈ 40.
 
 `sturm_be` stops tracking the pivots. It runs the recurrence in plain floating
 point, which makes the computed sequence the *exact* pivot sequence of a nearby
-tridiagonal matrix; Sylvester's law then applies to that matrix with no error
-term, and Weyl's inequality carries the conclusion back. Two bracketing sweeps
-at β ± δ pin the count for the operator itself, or the rule abstains because an
-eigenvalue sits too close to β to separate.
+matrix within the same band; Sylvester's law then applies to that matrix with no
+error term, and Weyl's inequality carries the conclusion back. Two bracketing
+sweeps at β ± δ pin the count for the operator itself, or the rule abstains
+because an eigenvalue sits too close to β to separate.
 
-**No constant is transcribed.** The classical form of this argument (Kahan 1966;
-Demmel, Dhillon and Ren for the IEEE correctness proof) ends in a symbolic bound
-with a small constant — and a constant copied out of a paper is exactly the kind
-of trust the rest of this kit refuses, because getting it slightly wrong yields a
-confident wrong answer rather than an abstention. So δ is bounded from the
-entries of the matrix in front of the checker, in outward-rounded interval
-arithmetic. Weaker than the sharp constant, and answerable without believing
-anyone. `test_delta_is_measured_not_assumed` scales the operator by 10⁶ and
-checks that δ scales with it.
+For a tridiagonal operator, δ is a small number of per-operation IEEE-754
+rounding budgets (`ETA`, `GAMMA`) applied to the entries — a tridiagonal pivot
+depends on exactly one previous column, so "how many roundings compose here" has
+one clean, hand-countable answer (`backward_error.sweep`). Past bandwidth 1 that
+count no longer has a bandwidth-independent form: a pivot of bandwidth `b`
+depends on up to `b` earlier columns, each contributing a term built from an
+already-rounded division. Rather than re-deriving a symbolic budget for each `b`
+by hand, `backward_error.sweep_banded` instead reconstructs `L D Lᵀ` from the
+actual computed float `L`, `D` and audits the residual against the true entries
+with `Iv` directly — rigorous regardless of how many roundings occurred, because
+it leans only on `Iv`'s own soundness plus Sylvester and Weyl, not on an
+assumed rounding model.
+
+**No constant is transcribed, either way.** The classical form of this argument
+(Kahan 1966; Demmel, Dhillon and Ren for the IEEE correctness proof) ends in a
+symbolic bound with a small constant — and a constant copied out of a paper is
+exactly the kind of trust the rest of this kit refuses, because getting it
+slightly wrong yields a confident wrong answer rather than an abstention. So δ is
+bounded from the entries of the matrix in front of the checker, in
+outward-rounded interval arithmetic, for both the tridiagonal and the banded
+route. Weaker than the sharp constant, and answerable without believing anyone.
+`test_delta_is_measured_not_assumed` scales the operator by 10⁶ and checks that
+δ scales with it; `test_delta_is_measured_not_assumed_banded` is the same check
+past bandwidth 1.
 
 ```
       n         gap    sturm (interval)    sturm_be (backward)
@@ -280,6 +295,27 @@ checks that δ scales with it.
    2000    7.39e-06             abstain                count=1
   20000    7.40e-08             abstain                count=1
 ```
+
+The same shape holds past bandwidth 1. On `L²` (`L` the 1D Laplacian above),
+pentadiagonal (bandwidth 2) with a closed-form spectrum `(2 - 2cos(kπ/(n+1)))²`:
+
+```
+      n         gap    sturm (banded, interval)    sturm_be (banded)
+     20    7.40e-03                     abstain               count=1
+     40    5.15e-04                     abstain               count=1
+    200    8.95e-07                     abstain               count=1
+   1000    1.46e-09                     abstain               count=1
+   2000    9.11e-11                     abstain               count=1
+  10000    1.46e-13                     abstain               abstain
+```
+
+The forward banded route gives up even earlier here than in the tridiagonal
+case (by n ≈ 20, not n ≈ 40) — squaring the Laplacian doubles the amplification
+the LDLᵀ recurrence accumulates per step. `sturm_be` reaches four orders of
+magnitude further in n before the entries themselves (now O(16), not O(2), from
+the squaring) push its own δ up to where it, too, must abstain at n = 10000.
+That final row is the honest boundary, not a gap in the measurement: unlike the
+tridiagonal case, this route does not reach arbitrarily far for this operator.
 
 `python examples/banded_demo.py`, discrete 1D Schrödinger operator with a
 harmonic well:
@@ -444,8 +480,8 @@ certkit/banded.py     banded LDL^T / Sturm counting          TRUSTED
 certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
 certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
-lean/Certkit/         soundness obligations in Lean 4       7 of 7 proved
-tests/                185 tests: fuzz, backends, composition, counting, adversarial, boundary
+lean/Certkit/         soundness obligations in Lean 4       9 of 9 proved
+tests/                199 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
 
 The trust boundary is enforced mechanically, not by comment.
@@ -470,18 +506,24 @@ of trusted preprocessing this design refuses.
 
 ## The Lean side
 
-`lean/Certkit/Soundness.lean` states seven soundness obligations against
-mathlib4 and compiles clean against the pinned mathlib. All seven are real,
+`lean/Certkit/Soundness.lean` states nine soundness obligations against
+mathlib4 and compiles clean against the pinned mathlib. All nine are real,
 zero-`sorry` proofs: Rayleigh–Ritz (`rayleigh_ritz_min`), Sylvester inertia
 (`inertia_count_below`), Gershgorin (`gershgorin_lower`), Temple's lower
 bound (`temple_lower`), the Weyl shift (`weyl_shift`), the residual-encloses
-claim (`residual_encloses_some_eigenvalue`), and the backward-error sweep
-bound (`sweep_backward_bound`). Every theorem compiling with no `sorry` is a
-fact about this file, not the same claim as "the checker is proved sound
-end-to-end" — that also requires the Python side to actually implement what
-each theorem states, and requires `lake build Certkit` to succeed for the
-project as a whole. The interval-arithmetic layer is a separate obligation,
-formalised and proved with zero `sorry` in `Interval.lean`.
+claim (`residual_encloses_some_eigenvalue`), the backward-error sweep bound
+(`sweep_backward_bound`), the general Hermitian operator-norm fact
+(`l2_opNorm_le_rowSum_of_isHermitian`), and the per-row bound
+(`sweep_row_bound`) that together close the gap `sweep_backward_bound`'s own
+doc comment used to name as the last open link — that the row-sums
+`backward_error.sweep` accumulates at runtime actually dominate the L2
+operator norm `weyl_shift` is stated against. Every theorem compiling with no
+`sorry` is a fact about this file, not the same claim as "the checker is
+proved sound end-to-end" — that also requires the Python side to actually
+implement what each theorem states, and requires `lake build Certkit` to
+succeed for the project as a whole. The interval-arithmetic layer is a
+separate obligation, formalised and proved with zero `sorry` in
+`Interval.lean`.
 
 ## Known limits
 
@@ -500,16 +542,22 @@ formalised and proved with zero `sorry` in `Interval.lean`.
   too large to materialise) still goes through matrix-free Lanczos and can
   still leave a poorly converged vector — that remains coverage work, not
   fixed by this change.
-- `sturm_be` is tridiagonal-only, and needs exactly represented entries. A Pauli
-  sum's diagonal is a sum of coefficients, so there is no single matrix the float
-  recurrence would be running on; the rule refuses rather than picking one.
+- `sturm_be` handles any bandwidth up to `MAX_BANDWIDTH` (certkit-4ue), and still
+  needs exactly represented entries. A Pauli sum's diagonal is a sum of
+  coefficients, so there is no single matrix the float recurrence would be
+  running on; the rule refuses rather than picking one.
 - A producer that only explores one symmetry sector of a larger operator --
   rather than the whole thing, as `certkit.producer` always does -- will
   abstain more often, not less: its `β` verifies only when that sector
   happens to hold the true ground state. That is a coverage cost the
   producer pays, never a soundness gap the checker has (certkit-487).
-- The forward-enclosure routes still grow, and still abstain rather than rounding
-  a pivot to a sign. They remain the only option above bandwidth 1.
+- The forward-enclosure routes (`inertia`, `sturm`) still track a compounding
+  enclosure and still abstain rather than rounding a pivot to a sign. `sturm_be`
+  is no longer limited to bandwidth 1 (certkit-4ue) and, measured on the `L²`
+  example above, reaches orders of magnitude further before it too must abstain
+  — but "further" is not "unconditional": for a fixed operator, a wide enough
+  band and a tight enough gap eventually push its own runtime-measured δ past
+  what the bracketing sweeps can resolve, same as the tridiagonal case.
 - **The checker is pure Python, and that cost is concentrated in `Iv` itself,
   not in the code that calls it (`certkit-ryd`).** `sturm`'s O(n b²) forward
   route is the one to worry about: cProfile on `count_eigenvalues_below_banded`
@@ -609,7 +657,7 @@ and the checker refuses it, correctly.
   matrix-free Gershgorin + Rayleigh route exists (`hermitian_gershgorin_rayleigh`);
   see "Complex Hermitian operators" above. It needs an interval LDL^T over `CIv`,
   which is unimplemented.
-- A banded (b > 1) version of the backward-error analysis.
-- Proofs on the Lean side.
+- Proofs on the Lean side for the banded backward-error route (certkit-4ue): the
+  existing `sweep_backward_bound` covers only the tridiagonal derivation.
 - A count rule that works matrix-free, which is what would let a large Pauli
   Hamiltonian use `temple_ref` instead of falling back to Gershgorin.

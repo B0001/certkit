@@ -9,7 +9,9 @@ they are different vectors. The finding (from `certkit-jn1.1`, on H2/sto-3g):
 an external bridge (not part of this repo) transcribed the bracket it
 computed from the complex `psi0` onto a certificate whose witness field
 actually carried `Re(psi0)`, and the checker refused it as "claimed interval
-is tighter than the re-derived enclosure".
+is disjoint from the re-derived enclosure" (certkit-85m split what was then a
+single "tighter than" message into "tighter than" vs "disjoint from",
+depending on whether the claimed and re-derived intervals overlap at all).
 
 That refusal is the checker doing its job: it re-derives mu and the residual
 from whatever vector is actually in the witness field, never from anything
@@ -105,7 +107,7 @@ def test_transcribed_bracket_does_not_verify():
 
     v = check(cert, enc)
     assert not v.ok
-    assert v.reason == "claimed interval is tighter than the re-derived enclosure"
+    assert v.reason == "claimed interval is disjoint from the re-derived enclosure"
     # And the re-derivation the checker actually used is centred on the real
     # part's own Rayleigh quotient (-2.0, e0's eigenvalue), not on mu_complex.
     lo, hi = v.rederived

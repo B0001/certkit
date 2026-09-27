@@ -44,7 +44,9 @@ is an exact factorisation of ``Atilde - beta I``, and by Sylvester's law the
 number of negative ``d_j`` is the number of eigenvalues of ``Atilde`` strictly
 below beta. The row sums of ``A - Atilde`` are computed directly, giving
 
-    delta >= ||A - Atilde||_2      (via ||E||_2 <= ||E||_inf for symmetric E,
+    delta >= ||A - Atilde||_inf    (row sum >= ETA*|p| + two_u*(|b_prev|+|b_next|)
+                                     per row, Certkit.Soundness.sweep_row_bound)
+          >= ||A - Atilde||_2      (via ||E||_2 <= ||E||_inf for symmetric E,
                                      Certkit.Soundness.l2_opNorm_le_rowSum_of_isHermitian)
 
 Weyl then gives, for every k, ``|lambda_k(A) - lambda_k(Atilde)| <= delta``.
@@ -68,6 +70,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .banded import MAX_BANDWIDTH
 from .interval import Iv, IntervalError
 from .operators import Operator
 
@@ -179,6 +182,9 @@ def sweep(diag: list[float], off: list[float], shift: float) -> Sweep:
             count += 1
 
         # Row j of |A - Atilde|: the diagonal perturbation plus both neighbours.
+        # Certkit.Soundness.sweep_row_bound proves this dominates the true row
+        # sum; that this Iv accumulation encloses the real value it computes
+        # is interval.py's own soundness contract, not a separate obligation.
         row = eta * Iv(abs(p), abs(p))
         for b in (off[j - 1] if j > 0 else 0.0, off[j] if j < n - 1 else 0.0):
             row = row + two_u * Iv(abs(b), abs(b))
@@ -188,16 +194,16 @@ def sweep(diag: list[float], off: list[float], shift: float) -> Sweep:
     return Sweep(count=count, delta=worst.hi)
 
 
-def count_eigenvalues_below_backward(op: Operator, beta: float) -> int:
-    """Eigenvalues of `op` strictly below `beta`, by backward error analysis.
+def _bracket_count(beta: float, sweep_at) -> int:
+    """Two bracketing sweeps at beta -/+ delta pin the exact count, or the
+    honest answer is that an eigenvalue is too close to beta to separate.
 
-    Raises IntervalError if the operator is not tridiagonal, if the recurrence
-    breaks down, or if an eigenvalue lies within the computed perturbation of
-    `beta` so that the count cannot be pinned.
+    This driver is shared by every backward-error counting route (tridiagonal
+    or banded): the bracketing argument only needs `sweep_at(shift)` to return
+    a `Sweep` for the pivot recurrence evaluated at that shift, and does not
+    care how the recurrence itself is organised.
     """
-    diag, off = tridiagonal_arrays(op)
-
-    probe = sweep(diag, off, beta)
+    probe = sweep_at(beta)
     guess = probe.delta
 
     for _ in range(MAX_REFINEMENTS):
@@ -206,8 +212,8 @@ def count_eigenvalues_below_backward(op: Operator, beta: float) -> int:
         lo_shift = (Iv.exact(beta) - Iv.exact(guess)).lo
         hi_shift = (Iv.exact(beta) + Iv.exact(guess)).hi
 
-        low = sweep(diag, off, lo_shift)
-        high = sweep(diag, off, hi_shift)
+        low = sweep_at(lo_shift)
+        high = sweep_at(hi_shift)
 
         # The bracketing argument needs the shifts to be at least as far out as
         # each sweep's own perturbation bound. Checked, never assumed.
@@ -225,3 +231,220 @@ def count_eigenvalues_below_backward(op: Operator, beta: float) -> int:
         return low.count
 
     raise IntervalError("perturbation bound did not settle")
+
+
+def count_eigenvalues_below_backward(op: Operator, beta: float) -> int:
+    """Eigenvalues of `op` strictly below `beta`, by backward error analysis.
+
+    Raises IntervalError if the operator is not tridiagonal, if the recurrence
+    breaks down, or if an eigenvalue lies within the computed perturbation of
+    `beta` so that the count cannot be pinned.
+    """
+    diag, off = tridiagonal_arrays(op)
+    return _bracket_count(beta, lambda shift: sweep(diag, off, shift))
+
+
+# -- bandwidth > 1: the same idea, without a hand-derived rounding budget ---
+#
+# The tridiagonal derivation above hand-counts how many roundings compose onto
+# each of the two quantities that matter (the shifted diagonal, and the
+# squared off-diagonal) and pads each count into ETA/GAMMA. That works because
+# a tridiagonal pivot depends on exactly one previous column. A banded pivot of
+# bandwidth b depends on up to b previous columns, and each of those
+# contributes a term built from an L entry that was itself the result of a
+# division by an *earlier* pivot -- so the "how many roundings compose here"
+# question no longer has one clean answer independent of b, and re-deriving a
+# symbolic ETA_b/GAMMA_b by hand for general b is exactly the kind of ad hoc
+# constant-fitting this kit exists to avoid.
+#
+# The way out is to stop counting roundings at all, in favour of a computation
+# that is rigorous regardless of how many roundings occurred. Run the banded
+# LDL^T elimination in plain floats to get L (unit lower triangular, band b)
+# and D (diagonal) -- whatever floats come out, however they got there. These
+# specific floats *define* a symmetric matrix
+#
+#     Mtilde := L D L^T          (real arithmetic, no rounding in this equation)
+#
+# with bandwidth <= b, because L has bandwidth <= b by construction (a formal
+# identity: Mtilde_ii = D_i + sum_k L_ik^2 D_k, Mtilde_ij = L_ij D_j +
+# sum_{k<j} L_ik L_jk D_k for i > j, both finite sums over the band). D's
+# negative-pivot count is Mtilde's inertia by Sylvester's law -- again a formal
+# fact about *this specific* L and D, not a claim about how they were computed.
+# Atilde := Mtilde + beta*I is then the matrix whose count-below-beta is
+# exactly the negative-pivot count, and the only work left is bounding
+# ||A - Atilde||, entry by entry, which is bounding
+#
+#     E_ii = Mtilde_ii - (A_ii - beta),   E_ij = Mtilde_ij - A_ij  (i > j)
+#
+# Every quantity on the right of both equations -- the specific L and D floats,
+# the exact matrix entries, beta -- is already a known, exact real number by
+# the time the elimination finishes. So E can be *rigorously enclosed* by
+# plugging those exact numbers into `Iv` arithmetic and reading off the
+# resulting interval's magnitude: no rounding-count argument is needed,
+# because `Iv` is already proven to enclose the true real result of any
+# expression built from `+`, `-`, `*` regardless of how many operations there
+# are (interval.py's soundness contract, checked against 240k exact-rational
+# cases -- certkit-jcb's 2026-09-01 review). This is strictly more general than
+# hand-counting roundings, and it is what makes bandwidth-independent-in-form
+# code possible here: the loop bound `b` changes; the argument for why the
+# result is sound does not.
+#
+# A consequence worth stating: unlike ETA/GAMMA, this bound does not assume the
+# "each op commits at most one rounding" model at all -- not because that
+# model is wrong (it is CPython's IEEE-754 behaviour, `certkit-8hn` checked it
+# cross-architecture), but because this argument never needs it. Only two
+# things must hold for correctness: every pivot must be a genuine nonzero
+# float (so its sign, and hence Sylvester's law, is well defined) and no
+# intermediate may be NaN/infinite/subnormal (so the elimination has not left
+# IEEE's normal range in a way this kit does not model elsewhere). Both are
+# checked with the same `_finite_normal` guard the tridiagonal sweep uses, out
+# of conservatism and consistency, not because this argument requires it.
+
+
+def banded_arrays(
+    op: Operator, max_bandwidth: int = MAX_BANDWIDTH
+) -> tuple[list[dict[int, float]], int]:
+    """Return (per-row exact entries, actual bandwidth), or refuse.
+
+    Generalises `tridiagonal_arrays` to bandwidth > 1: entries must be exactly
+    representable (no single matrix exists for an enclosed entry, as for a
+    Pauli sum), symmetric (checked here, not delegated -- certkit-279), and
+    within `max_bandwidth` of the diagonal.
+    """
+    n = op.n
+    rows: list[dict[int, float]] = [dict() for _ in range(n)]
+    bandwidth = 0
+    for i in range(n):
+        for j, v in op.row(i).items():
+            if v.lo != v.hi:
+                raise NotTridiagonal(
+                    "operator entries are inexact; the float recurrence needs "
+                    "an exactly represented matrix"
+                )
+            if v.lo == 0.0:
+                continue
+            d = abs(i - j)
+            if d > max_bandwidth:
+                raise IntervalError(
+                    f"operator bandwidth exceeds {max_bandwidth} (entry at {i},{j})"
+                )
+            if d > bandwidth:
+                bandwidth = d
+            rows[i][j] = v.lo
+
+    for i in range(n):
+        for j, val in rows[i].items():
+            if j == i:
+                continue
+            mirror = rows[j].get(i)
+            if mirror != val:
+                raise IntervalError(
+                    f"operator is not symmetric: [{i},{j}] = {val}, [{j},{i}] = {mirror}"
+                )
+    return rows, bandwidth
+
+
+def sweep_banded(rows: list[dict[int, float]], bandwidth: int, shift: float) -> Sweep:
+    """One float banded LDL^T sweep plus a rigorous bound on the implied
+    perturbation, computed by auditing the reconstruction with `Iv` rather
+    than by a hand-derived rounding budget. See the module comment above.
+
+    Raises IntervalError on a zero pivot, on overflow, or on any subnormal
+    intermediate -- the same discipline `sweep` uses, for the same reason.
+    """
+    n = len(rows)
+    if not math.isfinite(shift):
+        raise IntervalError("non-finite shift")
+    b = bandwidth
+
+    def entry(i: int, j: int) -> float:
+        return rows[i].get(j, 0.0)
+
+    d: list[float] = [0.0] * n
+    lmat: dict[tuple[int, int], float] = {}
+    row_err = [Iv.exact(0.0) for _ in range(n)]
+
+    count = 0
+    for j in range(n):
+        p = entry(j, j) - shift
+        if not _finite_normal(p):
+            raise IntervalError(f"diagonal term {j} is not a normal float")
+
+        s = p
+        recon = Iv.exact(0.0)  # will hold D_j + sum_k L_jk^2 D_k, audited
+        for k in range(max(0, j - b), j):
+            ljk = lmat[(j, k)]
+            term = ljk * ljk * d[k]
+            if not (term == 0.0 or _finite_normal(term)):
+                raise IntervalError(f"pivot {j} correction from column {k} left the normal range")
+            s = s - term
+            if not (s == 0.0 or _finite_normal(s)):
+                raise IntervalError(f"pivot {j} left the normal range while subtracting column {k}")
+            recon = recon + Iv.exact(ljk) * Iv.exact(ljk) * Iv.exact(d[k])
+
+        if not _finite_normal(s) or s == 0.0:
+            raise IntervalError(f"pivot {j} is zero or subnormal; inertia not determined")
+        d[j] = s
+        if s < 0.0:
+            count += 1
+
+        recon = recon + Iv.exact(d[j])
+        e_jj = recon - (Iv.exact(entry(j, j)) - Iv.exact(shift))
+        row_err[j] = row_err[j] + Iv.exact(e_jj.mag_ub)
+
+        for i in range(j + 1, min(n, j + b + 1)):
+            t = entry(i, j)
+            recon_ij = Iv.exact(0.0)
+            for k in range(max(0, i - b), j):
+                lik = lmat.get((i, k))
+                if lik is None:
+                    continue
+                ljk = lmat[(j, k)]
+                prod = lik * ljk * d[k]
+                if not (prod == 0.0 or _finite_normal(prod)):
+                    raise IntervalError(
+                        f"entry ({i},{j}) correction from column {k} left the normal range"
+                    )
+                t = t - prod
+                if not (t == 0.0 or _finite_normal(t)):
+                    raise IntervalError(f"entry ({i},{j}) left the normal range")
+                recon_ij = recon_ij + Iv.exact(lik) * Iv.exact(ljk) * Iv.exact(d[k])
+
+            if t == 0.0:
+                lij = 0.0
+            else:
+                lij = t / d[j]
+                if not _finite_normal(lij):
+                    raise IntervalError(f"L[{i},{j}] left the normal range")
+            lmat[(i, j)] = lij
+
+            recon_ij = recon_ij + Iv.exact(lij) * Iv.exact(d[j])
+            e_ij = recon_ij - Iv.exact(entry(i, j))
+            contribution = Iv.exact(e_ij.mag_ub)
+            row_err[i] = row_err[i] + contribution
+            row_err[j] = row_err[j] + contribution
+
+        stale = j - b
+        if stale >= 0:
+            for i in range(stale + 1, min(n, stale + b + 1)):
+                lmat.pop((i, stale), None)
+
+    worst = 0.0
+    for r in row_err:
+        if r.hi > worst:
+            worst = r.hi
+    return Sweep(count=count, delta=worst)
+
+
+def count_eigenvalues_below_backward_banded(
+    op: Operator, beta: float, max_bandwidth: int = MAX_BANDWIDTH
+) -> int:
+    """Eigenvalues of `op` strictly below `beta`, by backward error analysis
+    over the whole band rather than just the tridiagonal case.
+
+    Raises IntervalError if the operator is not within `max_bandwidth` of the
+    diagonal, if the recurrence breaks down, or if an eigenvalue lies within
+    the computed perturbation of `beta` so the count cannot be pinned.
+    """
+    rows, b = banded_arrays(op, max_bandwidth)
+    return _bracket_count(beta, lambda shift: sweep_banded(rows, b, shift))

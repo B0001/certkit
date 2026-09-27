@@ -17,14 +17,17 @@ import pytest
 
 from certkit.backward_error import (
     NotTridiagonal,
+    banded_arrays,
     count_eigenvalues_below_backward,
+    count_eigenvalues_below_backward_banded,
     sweep,
+    sweep_banded,
     tridiagonal_arrays,
 )
-from certkit.banded import count_eigenvalues_below_banded
+from certkit.banded import MAX_BANDWIDTH, count_eigenvalues_below_banded
 from certkit.checker import bundle_verdict, check, check_bundle
 from certkit.interval import IntervalError
-from certkit.operators import decode_operator, encode_csr
+from certkit.operators import DenseSymmetric, decode_operator, encode_csr
 from certkit.producer import (
     certify_count_below,
     certify_count_below_backward,
@@ -51,6 +54,23 @@ def random_tridiagonal(n: int, seed: int, scale: float = 1.0):
         indptr.append(len(indices))
     dense = np.diag(d) + np.diag(e[: n - 1], 1) + np.diag(e[: n - 1], -1)
     return encode_csr(n, indptr, indices, data), dense
+
+
+def random_banded(n: int, bandwidth: int, seed: int, scale: float = 1.0):
+    rng = np.random.default_rng(seed)
+    a = np.zeros((n, n))
+    for i in range(n):
+        for j in range(i, min(n, i + bandwidth + 1)):
+            v = rng.standard_normal() * scale + (4.0 * scale if i == j else 0.0)
+            a[i, j] = a[j, i] = float(v)
+    indptr, indices, data = [0], [], []
+    for i in range(n):
+        for j in range(n):
+            if a[i, j] != 0.0:
+                indices.append(j)
+                data.append(float(a[i, j]))
+        indptr.append(len(indices))
+    return encode_csr(n, indptr, indices, data), a
 
 
 def laplacian_eigs(n: int) -> np.ndarray:
@@ -84,6 +104,41 @@ def exact_lambda_min(enc: dict, iterations: int = 70):
         else:
             lo = mid
     return lo, hi
+
+
+def exact_count_below_banded(enc: dict, bandwidth: int, beta: Fraction) -> int:
+    """Exact-rational LDL^T over the band. No floating point anywhere.
+
+    The same elimination `sweep_banded` runs in float, run instead in exact
+    Fraction arithmetic, as ground truth for what "the count for this operator"
+    even means once the perturbation gets too small for LAPACK to resolve.
+    """
+    op = decode_operator(enc)
+    n = op.n
+    a: dict[tuple[int, int], Fraction] = {}
+    for i in range(n):
+        for j, v in op.row(i).items():
+            a[(i, j)] = Fraction(v.lo)
+
+    d: list[Fraction] = [Fraction(0)] * n
+    l: dict[tuple[int, int], Fraction] = {}
+    count = 0
+    for j in range(n):
+        s = a.get((j, j), Fraction(0)) - beta
+        for k in range(max(0, j - bandwidth), j):
+            s -= l[(j, k)] * l[(j, k)] * d[k]
+        if s == 0:
+            s = Fraction(1, 10**40)
+        d[j] = s
+        if s < 0:
+            count += 1
+        for i in range(j + 1, min(n, j + bandwidth + 1)):
+            t = a.get((i, j), Fraction(0))
+            for k in range(max(0, i - bandwidth), j):
+                if (i, k) in l:
+                    t -= l[(i, k)] * l[(j, k)] * d[k]
+            l[(i, j)] = t / d[j]
+    return count
 
 
 # -- correctness ----------------------------------------------------------
@@ -171,6 +226,161 @@ def test_non_finite_shift_is_refused():
     d, o = tridiagonal_arrays(decode_operator(laplacian_1d(5)))
     with pytest.raises(IntervalError):
         sweep(d, o, float("inf"))
+
+
+# -- bandwidth > 1 (certkit-4ue) -------------------------------------------
+#
+# `tridiagonal_arrays`/`sweep` hand-count exactly four roundings per pivot step
+# and pad them into ETA/GAMMA; that only works because a tridiagonal pivot
+# depends on one previous column. The banded generalisation below abandons
+# rounding-counting altogether and instead audits the actual computed L, D
+# reconstruction with `Iv` (see the module comment in backward_error.py above
+# `banded_arrays`), so these tests both confirm the numbers agree with
+# independent routes and specifically retarget the bead's named acceptance
+# test -- that the measured delta scales with the operator -- onto the band.
+@pytest.mark.parametrize("bandwidth", [1, 2, 4])
+def test_banded_backward_matches_lapack_across_the_spectrum(bandwidth):
+    enc, dense = random_banded(22, bandwidth, seed=100 + bandwidth)
+    op = decode_operator(enc)
+    eigs = np.linalg.eigvalsh(dense)
+    checked = 0
+    for beta in np.linspace(eigs[0] - 1.0, eigs[-1] + 1.0, 30):
+        try:
+            got = count_eigenvalues_below_backward_banded(op, float(beta))
+        except IntervalError:
+            continue  # abstention near an eigenvalue is always allowed
+        assert got == int((eigs < beta).sum()), (bandwidth, beta, got)
+        checked += 1
+    assert checked > 15
+
+
+def test_banded_backward_agrees_with_the_forward_banded_route():
+    """Two routes sharing no code path beyond Iv itself, same answer."""
+    enc, dense = random_banded(18, 3, seed=13)
+    op = decode_operator(enc)
+    eigs = np.linalg.eigvalsh(dense)
+    agreed = 0
+    for beta in np.linspace(eigs[0] - 0.5, eigs[-1] + 0.5, 25):
+        try:
+            a = count_eigenvalues_below_backward_banded(op, float(beta))
+            b = count_eigenvalues_below_banded(op, float(beta))
+        except IntervalError:
+            continue
+        assert a == b
+        agreed += 1
+    assert agreed > 10
+
+
+def test_banded_backward_matches_exact_rational_oracle():
+    """No floating point anywhere in the ground truth, not even LAPACK's."""
+    bandwidth = 3
+    enc, _ = random_banded(15, bandwidth, seed=17)
+    op = decode_operator(enc)
+    for beta in (-6.0, -2.0, 0.0, 2.0, 6.0):
+        got = count_eigenvalues_below_backward_banded(op, beta)
+        want = exact_count_below_banded(enc, bandwidth, Fraction(beta))
+        assert got == want
+
+
+def test_delta_is_measured_not_assumed_banded():
+    """The bead's named acceptance test, extended to bandwidth > 1.
+
+    Same claim as `test_delta_is_measured_not_assumed`: scale the operator and
+    the measured perturbation bound scales with it. A hard-coded constant, or
+    one derived for the wrong bandwidth, would not do this -- the bound comes
+    from auditing the actual L, D floats this operator produced.
+    """
+    small, _ = random_banded(30, 3, seed=1, scale=1.0)
+    large, _ = random_banded(30, 3, seed=1, scale=1e6)
+    rows_s, bw_s = banded_arrays(decode_operator(small))
+    rows_l, bw_l = banded_arrays(decode_operator(large))
+    delta_small = sweep_banded(rows_s, bw_s, 0.0).delta
+    delta_large = sweep_banded(rows_l, bw_l, 0.0).delta
+    assert delta_small > 0.0
+    assert 0.5e6 < delta_large / delta_small < 2e6
+
+
+def test_banded_delta_is_tiny_relative_to_the_operator_norm():
+    enc, _ = random_banded(200, 3, seed=7)
+    rows, bw = banded_arrays(decode_operator(enc))
+    assert sweep_banded(rows, bw, -1.0).delta < 1e-10
+
+
+def test_banded_beta_on_an_eigenvalue_abstains():
+    enc, dense = random_banded(60, 3, seed=9)
+    op = decode_operator(enc)
+    eigs = np.linalg.eigvalsh(dense)
+    with pytest.raises(IntervalError) as exc:
+        count_eigenvalues_below_backward_banded(op, float(eigs[10]))
+    assert "within" in str(exc.value)
+
+
+def test_banded_exceeding_the_bandwidth_limit_is_refused():
+    enc, _ = random_banded(12, 6, seed=2)
+    op = decode_operator(enc)
+    with pytest.raises(IntervalError, match="bandwidth"):
+        count_eigenvalues_below_backward_banded(op, 0.0, max_bandwidth=3)
+
+
+def test_banded_non_banded_operator_is_refused():
+    """A single corner entry outside the default MAX_BANDWIDTH is enough,
+    with every other entry exact and near the diagonal."""
+    n = MAX_BANDWIDTH + 6
+    rows = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        rows[i][i] = 2.0
+    rows[0][n - 1] = rows[n - 1][0] = 1.0
+    op = DenseSymmetric(rows)
+    with pytest.raises(IntervalError) as exc:
+        count_eigenvalues_below_backward_banded(op, 0.0)
+    assert "bandwidth" in str(exc.value)
+
+
+def test_banded_inexact_entries_are_refused():
+    """A Pauli diagonal is a sum of coefficients, so there is no single matrix
+    the float recurrence would be running on. tfim_hamiltonian(2) happens to
+    come out exact (n=4 is small enough), so this needs a size where the
+    Pauli sum's rounding actually shows up -- confirmed empirically, not
+    assumed, since the exactness of a sum-of-coefficients diagonal is a
+    property of the specific coefficients, not something to guess at."""
+    op = decode_operator(tfim_hamiltonian(5))
+    with pytest.raises(NotTridiagonal):
+        banded_arrays(op)
+
+
+def test_banded_asymmetric_operator_is_refused_without_decode_operator():
+    """certkit-279's guard, extended: `sweep_banded` also reads only one of
+    each off-diagonal pair, so `banded_arrays` must check symmetry itself."""
+    op = DenseSymmetric(
+        [
+            [2.0, 1.0, 0.5, 0.0],
+            [7.0, 2.0, 1.0, 0.5],
+            [0.5, 1.0, 2.0, 1.0],
+            [0.0, 0.5, 1.0, 2.0],
+        ]
+    )
+    with pytest.raises(IntervalError, match="not symmetric"):
+        banded_arrays(op)
+
+
+def test_sturm_be_falls_back_to_banded_for_bandwidth_greater_than_one():
+    """checker.py's `_rule_sturm_be` end to end: a genuinely banded (not
+    tridiagonal) operator must still verify a `sturm_be` certificate, by
+    catching `NotTridiagonal` and falling back to the banded route."""
+    enc, dense = random_banded(24, 3, seed=41)
+    eigs = np.linalg.eigvalsh(dense)
+    beta = float(0.5 * (eigs[7] + eigs[8]))
+    count = int((eigs < beta).sum())
+    cert, _ = certify_count_below_backward(enc, beta, count)
+    v = check(cert, enc)
+    assert v.ok and v.rule == "sturm_be"
+
+
+def test_sturm_be_catches_a_lying_banded_certificate():
+    enc, dense = random_banded(20, 2, seed=43)
+    bad, _ = certify_count_below_backward(enc, -100.0, 3)
+    v = check(bad, enc)
+    assert not v.ok and "re-derived" in v.reason
 
 
 # -- reach ----------------------------------------------------------------

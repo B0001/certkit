@@ -35,7 +35,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-from .backward_error import count_eigenvalues_below_backward
+from .backward_error import (
+    NotTridiagonal,
+    count_eigenvalues_below_backward,
+    count_eigenvalues_below_backward_banded,
+)
 from .banded import count_eigenvalues_below_banded
 from .interval import CIv, CZERO, Iv, IntervalError, cdot, csqnorm, dot, sqnorm
 from .operators import Operator, decode_operator, operator_ref
@@ -216,9 +220,18 @@ def _gershgorin_lower_complex(op: Operator) -> Iv:
 def _implies(claim_lo, claim_hi, lo, hi, kind, rule, deps=()) -> Verdict:
     """The claim is accepted iff the re-derived enclosure implies it."""
     if not (claim_lo <= lo and hi <= claim_hi):
+        # Two distinct failure shapes get lumped into one boolean above, and
+        # they need different words: overlapping-but-insufficient means the
+        # producer was overconfident about a claim in the right place;
+        # disjoint means the claim and the re-derived enclosure don't share a
+        # single point, i.e. the claim is about the wrong place entirely.
+        if claim_hi < lo or hi < claim_lo:
+            reason = "claimed interval is disjoint from the re-derived enclosure"
+        else:
+            reason = "claimed interval is tighter than the re-derived enclosure"
         return Verdict(
             status="ABSTAIN",
-            reason="claimed interval is tighter than the re-derived enclosure",
+            reason=reason,
             claim_kind=kind,
             rule=rule,
             enclosure=(claim_lo, claim_hi),
@@ -637,7 +650,10 @@ def _rule_sturm_be(op, claim, witness, ctx) -> Verdict:
     count = claim.get("count")
     require(isinstance(count, int) and count >= 0, "count must be a non-negative integer")
 
-    got = count_eigenvalues_below_backward(op, beta)
+    try:
+        got = count_eigenvalues_below_backward(op, beta)
+    except NotTridiagonal:
+        got = count_eigenvalues_below_backward_banded(op, beta)
     if got != count:
         return _abstain(
             f"claimed {count} eigenvalues below beta, re-derived {got}",
@@ -747,7 +763,14 @@ def _verify(cert: Any, ctx: Context) -> Verdict:
 
 def _verify_uncached(cert: Any, ctx: Context) -> Verdict:
     try:
-        verify_seal(cert)
+        # Shape first, seal second. A document that isn't even certificate-
+        # shaped (wrong type, missing schema/claim/witness) is a different
+        # defect from one that has the right shape but a wrong content hash,
+        # and the two must not produce the same "content hash mismatch"
+        # message -- that message should mean "this was tampered with",
+        # not "this was never a certificate." `isinstance` must run before
+        # any `.get` below, since a non-dict has no `.get` to call.
+        require(isinstance(cert, dict), "certificate is not an object")
         require(cert.get("schema") == SCHEMA_VERSION, "unknown schema version")
 
         claim, witness = cert.get("claim"), cert.get("witness")
@@ -758,6 +781,8 @@ def _verify_uncached(cert: Any, ctx: Context) -> Verdict:
         require(rule in RULES, f"unknown witness rule {rule!r}")
         kind, handler, _needs_vector = RULES[rule]
         require(claim.get("kind") == kind, "claim kind does not match witness rule")
+
+        verify_seal(cert)
 
         op_ref = claim.get("operator_ref")
         enc = ctx.operators.get(op_ref)

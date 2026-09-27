@@ -2,18 +2,23 @@
   certkit -- soundness obligations, stated in Lean 4 / mathlib4.
 
   STATUS: compiles clean against the pinned mathlib (see lake-manifest.json).
-  All eight theorems below are real, zero-`sorry` proofs: `rayleigh_ritz_min`,
+  All nine theorems below are real, zero-`sorry` proofs: `rayleigh_ritz_min`,
   `inertia_count_below`, `gershgorin_lower`, `temple_lower`, `weyl_shift`,
   `residual_encloses_some_eigenvalue`, `l2_opNorm_le_rowSum_of_isHermitian`,
-  and `sweep_backward_bound`. The last two each have their own doc comment on
-  exactly what they do and do not cover -- in particular `sweep_backward_bound`'s
-  doc comment flags a specific, still-uncovered gap: that the row-sums
-  `backward_error.sweep` accumulates at runtime actually dominate
-  `‖A - Atilde‖_∞`, an `Iv`-arithmetic bookkeeping fact about that Python
-  loop rather than a Lean obligation. (The norm-inequality half of that
-  gap -- `‖·‖_∞` dominating the `‖·‖_2` `weyl_shift` is stated against --
-  is closed by `l2_opNorm_le_rowSum_of_isHermitian`.) Every theorem
-  compiling with no `sorry` is a fact about this file;
+  `sweep_backward_bound`, and `sweep_row_bound`. The last three each have
+  their own doc comment on exactly what they do and do not cover. Together
+  they close the chain `sweep_backward_bound`'s doc comment used to name as
+  the last open link (`certkit-62j`): that the row-sums `backward_error.sweep`
+  accumulates at runtime actually dominate `‖A - Atilde‖_∞`
+  (`sweep_row_bound`, the per-row math) and that `‖·‖_∞` in turn dominates
+  the `‖·‖_2` `weyl_shift` is stated against (`l2_opNorm_le_rowSum_of_isHermitian`,
+  a separate general Hermitian-matrix fact, `certkit-zm6`). What remains
+  outside this file, by design (see `sweep_row_bound`'s own doc comment): that
+  `backward_error.sweep`'s `Iv`-arithmetic loop computes an outward-rounded
+  enclosure of the real-number bound `sweep_row_bound` proves -- a fact about
+  `Interval.lean`'s already-proved soundness contract applied to a specific
+  expression, checked by the Python test suite, not a new Lean obligation.
+  Every theorem compiling with no `sorry` is a fact about this file;
   it is not the same claim as "the checker is proved sound end-to-end" --
   that also requires the Python side to actually implement what each theorem
   states (see the correspondence table below) and requires `lake build
@@ -31,6 +36,8 @@
     backward_error.count_eigenvalues_below_backward <->  inertia_count_below
                                                      +   weyl_shift
                                                      +   l2_opNorm_le_rowSum_of_isHermitian
+                                                     +   sweep_backward_bound
+                                                     +   sweep_row_bound
     checker._rule_gershgorin_rayleigh  lower bound  <->  gershgorin_lower
 
   A third obligation -- that interval arithmetic on doubles encloses the
@@ -802,12 +809,12 @@ theorem l2_opNorm_le_rowSum_of_isHermitian [Nonempty n] {E : Matrix n n ℝ}
     original framing -- that the row-sums `sweep` accumulates from these
     factors actually dominate `‖A - Atilde‖_∞` (an `Iv`-arithmetic
     bookkeeping fact about `backward_error.sweep`'s Python loop, not part of
-    the one-rounding algebra). That the row-sum norm `‖·‖_∞` in turn dominates
-    the operator norm `‖·‖_2` used by `weyl_shift` above is a separate,
-    general Hermitian-matrix norm inequality, unrelated to rounding -- it is
-    proved above as `l2_opNorm_le_rowSum_of_isHermitian`, not by this
-    theorem. Only the `Iv`-arithmetic bookkeeping fact remains open here,
-    covered by the Python test suite, not by this theorem. -/
+    the one-rounding algebra). That further step -- the row-sum math, not the
+    Python loop's faithfulness to it -- is `sweep_row_bound` below
+    (`certkit-62j`). That the row-sum norm `‖·‖_∞` in turn dominates the
+    operator norm `‖·‖_2` used by `weyl_shift` above is a separate, general
+    Hermitian-matrix norm inequality, unrelated to rounding -- it is proved
+    above as `l2_opNorm_le_rowSum_of_isHermitian`, not by this theorem. -/
 theorem sweep_backward_bound {u e0 e1 e2 e3 a beta bprev dprev : ℝ}
     (hu : 0 ≤ u) (hu1 : u ≤ 1 / 32)
     (h0 : |e0| ≤ u) (h1 : |e1| ≤ u) (h2 : |e2| ≤ u) (h3 : |e3| ≤ u) :
@@ -815,5 +822,73 @@ theorem sweep_backward_bound {u e0 e1 e2 e3 a beta bprev dprev : ℝ}
         = (a - beta) * (1 + eta_of e2 e3) - bprev ^ 2 * (1 + gamma_of e0 e1 e3) / dprev)
       ∧ |eta_of e2 e3| ≤ 2.1 * u ∧ |gamma_of e0 e1 e3| ≤ 3.1 * u :=
   sweep_step_backward_bound hu hu1 h0 h1 h2 h3
+
+/-- **Row sum of the perturbation, for one interior row of the tridiagonal
+    sweep** (`certkit-62j`). `sweep`'s runtime code accumulates
+    `ETA * |p| + two_u * (|b_{j-1}| + |b_j|)` for row `j` (`p = fl(a_j -
+    beta)`, the two `b`s its tridiagonal neighbours); this theorem proves
+    that quantity dominates the actual row sum of `|A - Atilde|`, i.e.
+    `|E_jj| + |E_{j,j-1}| + |E_{j,j+1}|` for `E := A - Atilde`, matching the
+    module docstring's `backward_error.py:45` claim ("The row sums of
+    `A - Atilde` are computed directly").
+
+    Three sub-obligations, one per summand:
+    1. Diagonal: `E_jj = (a_j - beta) * eta_of e2 e3`, scaled against the
+       *rounded* `p = (a_j - beta) * (1 + e2)`, not the exact `a_j - beta` --
+       `Certkit.diag_perturbation_le`, the subtlety `ETA`'s `0.1 * u`
+       headroom was silently covering.
+    2. Off-diagonal, previous neighbour: `Certkit.sqrt_one_add_sub_one_abs_le`
+       instantiated at `gamma_of e0 e1 e3`, the exact aggregate
+       `sweep_step_backward_bound` proves for `bprev^2`.
+    3. Off-diagonal, next neighbour: the same lemma, at an independently
+       bounded `gnext` -- `sweep`'s loop derives this from column `j`'s own
+       step, not column `j - 1`'s, so it is a separate hypothesis rather than
+       a reuse of `gamma_of e0 e1 e3`.
+
+    `Atilde` symmetric (needed for `l2_opNorm_le_rowSum_of_isHermitian` above
+    to apply to `E` at all): true by construction, not by a separate
+    argument. This theorem's off-diagonal terms name a single `bprev` and a
+    single `bnext` -- there is no second, independently-perturbed copy of
+    either entry for the statement to have to reconcile against. The mirror
+    instance of this same theorem for row `j - 1` reads that row's `bnext`
+    as the very same real number this instance calls `bprev`; nothing in
+    `backward_error.sweep` ever computes two different perturbed values for
+    one stored off-diagonal entry (`off[j-1]`, read once). The shared real
+    number *is* the symmetry; there is no further Lean obligation here.
+
+    What this theorem does **not** cover, matching `sweep_backward_bound`'s
+    own scope above: that `sweep`'s `Iv`-arithmetic accumulation (`row = eta
+    * Iv(...) + two_u * Iv(...) + ...`) computes an outward-rounded
+    enclosure of the real-number RHS below. `Iv` is already proved (in
+    `Interval.lean`, zero `sorry`) to enclose the exact real result of any
+    `+`/`-`/`*` expression regardless of shape; once the real-number
+    inequality below holds, that `sweep`'s `worst.hi` bounds it is a fact
+    about `Iv` already covered there, checked by the Python test suite, and
+    not a new obligation for this theorem to discharge. -/
+theorem sweep_row_bound
+    {u e0 e1 e2 e3 gnext a beta bprev bnext : ℝ}
+    (hu : 0 ≤ u) (hu1 : u ≤ 1 / 32)
+    (h0 : |e0| ≤ u) (h1 : |e1| ≤ u) (h2 : |e2| ≤ u) (h3 : |e3| ≤ u)
+    (hgnext : |gnext| ≤ 3.1 * u) :
+    |(a - beta) * eta_of e2 e3|
+        + |bprev * (Real.sqrt (1 + gamma_of e0 e1 e3) - 1)|
+        + |bnext * (Real.sqrt (1 + gnext) - 1)|
+      ≤ (2.1 * u) * |(a - beta) * (1 + e2)| + (2 * u) * |bprev| + (2 * u) * |bnext| := by
+  have hdiag : |(a - beta) * eta_of e2 e3| ≤ (2.1 * u) * |(a - beta) * (1 + e2)| := by
+    rw [abs_mul]; exact diag_perturbation_le hu hu1 h2 h3
+  have hgamma := gamma_bound hu hu1 h0 h1 h3
+  have hprev : |bprev * (Real.sqrt (1 + gamma_of e0 e1 e3) - 1)| ≤ (2 * u) * |bprev| :=
+    calc |bprev * (Real.sqrt (1 + gamma_of e0 e1 e3) - 1)|
+        = |bprev| * |Real.sqrt (1 + gamma_of e0 e1 e3) - 1| := abs_mul _ _
+      _ ≤ |bprev| * (2 * u) :=
+          mul_le_mul_of_nonneg_left (sqrt_one_add_sub_one_abs_le hu hu1 hgamma) (abs_nonneg _)
+      _ = (2 * u) * |bprev| := mul_comm _ _
+  have hnext : |bnext * (Real.sqrt (1 + gnext) - 1)| ≤ (2 * u) * |bnext| :=
+    calc |bnext * (Real.sqrt (1 + gnext) - 1)|
+        = |bnext| * |Real.sqrt (1 + gnext) - 1| := abs_mul _ _
+      _ ≤ |bnext| * (2 * u) :=
+          mul_le_mul_of_nonneg_left (sqrt_one_add_sub_one_abs_le hu hu1 hgnext) (abs_nonneg _)
+      _ = (2 * u) * |bnext| := mul_comm _ _
+  linarith [hdiag, hprev, hnext]
 
 end Certkit

@@ -154,29 +154,29 @@ If $C_L = C_H$, the count is exact. Otherwise it abstains.
 
 Tick each item or file a defect. Anything not ticked means no sign-off.
 
-- [ ] **§2 identity.** `sweep` performs exactly the four operations shown, in that order, on the
+- [x] **§2 identity.** `sweep` performs exactly the four operations shown, in that order, on the
       computed $d_{j-1}$ (lines 162–175), and the expansion into $\eta_j,\gamma_j$ is right.
-- [ ] **Budgets.** $2u+u^2 \le 2.1u$ and $3u+3u^2+u^3 \le 3.1u$ at $u=2^{-53}$, and the
+- [x] **Budgets.** $2u+u^2 \le 2.1u$ and $3u+3u^2+u^3 \le 3.1u$ at $u=2^{-53}$, and the
       $\sqrt{\cdot}$ bound $\le 2u$.
-- [ ] **$|p_j|$ vs $|a_j-\beta|$.** The row sum charges $\texttt{ETA}\cdot|p_j|$, the computed
+- [x] **$|p_j|$ vs $|a_j-\beta|$.** The row sum charges $\texttt{ETA}\cdot|p_j|$, the computed
       value, while the perturbation is $|a_j-\beta|\,|\eta_j|$. Confirm the slack covers it:
       $$
       |a_j-\beta|\,|\eta_j| \le \frac{|p_j|}{1-u}\,(2u+u^2) \approx (2u+3u^2)\,|p_j| \le 2.1u\,|p_j| .
       $$
-- [ ] **Row structure.** Row $j$'s off-diagonal entries are $b_{j-1}-\tilde b_{j-1}$ (set by
+- [x] **Row structure.** Row $j$'s off-diagonal entries are $b_{j-1}-\tilde b_{j-1}$ (set by
       $\gamma_j$) and $b_j-\tilde b_j$ (set by $\gamma_{j+1}$), so $E$ is symmetric, as
       $\|E\|_2\le\|E\|_\infty$ requires.
-- [ ] **Against the paper.** Read DDR pp. 131–133 (the derivation of (5.6) and §5.2 for tridiagonal
+- [x] **Against the paper.** Read DDR pp. 131–133 (the derivation of (5.6) and §5.2 for tridiagonal
       matrices) and Table 5.1 on p. 137. Confirm the 2.5ε-vs-certkit difference is *only* the
       placement of roundings described in §3.
-- [ ] **Guards.** Every intermediate is normal or exactly zero (lines 150–177), so no
+- [x] **Guards.** Every intermediate is normal or exactly zero (lines 150–177), so no
       gradual-underflow term is missing.
-- [ ] **Bracketing.** The margin check at lines 214–216 happens *before* the counts are compared.
-- [ ] **Platform assumptions** (TCB.md §1: binary64, no FMA contraction, correctly rounded
+- [x] **Bracketing.** The margin check at lines 214–216 happens *before* the counts are compared.
+- [x] **Platform assumptions** (TCB.md §1: binary64, no FMA contraction, correctly rounded
       `sqrt`/`nextafter`). These are probed on every CI run on x86_64 and match macOS arm64 bit
       for bit (`tests/probe_platform.py`, `tests/platform_digest.txt`; certkit-8hn). Decide whether
       that's enough or whether a runtime guard is wanted.
-- [ ] **certkit-330 fix** (`checker.py:724–745`). `_verify` authenticates the seal (`_sealed`)
+- [x] **certkit-330 fix** (`checker.py:724–745`). `_verify` authenticates the seal (`_sealed`)
       *before* reading or writing the memo, and `check_bundle` indexes only sealed certificates.
       Tests: `tests/test_composition.py` (all permutations of a forged duplicate hash). Its known
       residual: with a forged duplicate present, the *report* entry under that hash shows whichever

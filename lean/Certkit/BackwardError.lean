@@ -111,4 +111,75 @@ theorem sweep_step_backward_bound {u e0 e1 e2 e3 a beta bprev dprev : ℝ}
   field_simp
   ring
 
+/-! ### The row-sum obligation (`certkit-62j`)
+
+`backward_error.sweep` does not accumulate `ETA * |a_j - beta|` for row `j`'s
+diagonal contribution -- it accumulates `ETA * |p|` where `p = fl(a_j -
+beta) = (a_j - beta) * (1 + e2)` is the *rounded* value the runtime code
+actually holds. `eta_bound` above only bounds `|eta_of e2 e3|` by `2.1 * u`
+outright; it says nothing about how that bound relates to `|1 + e2|`, which
+is exactly the gap between the exact `a_j - beta` and the rounded `p` the
+runtime code scales by. `diag_perturbation_le` below is the sharper claim
+that closes it. -/
+
+/-- **Diagonal perturbation, scaled by the rounded pivot rather than the
+    exact value.** The true diagonal perturbation on row `j` is
+    `(a_j - beta) * eta_of e2 e3` (since `atilde_j - beta =
+    (a_j - beta) * (1 + eta_of e2 e3)`, from `sweep_step_backward_bound`
+    above), but the runtime code scales `ETA` by `|p| = |(a_j - beta) *
+    (1 + e2)|`, not by `|a_j - beta|` itself. Soundness needs
+    `|a_j - beta| * |eta_of e2 e3| ≤ (2.1 * u) * |(a_j - beta) * (1 + e2)|`,
+    which is strictly stronger than `eta_bound`'s `|eta_of e2 e3| ≤ 2.1 * u`
+    whenever `|1 + e2| < 1` (i.e. `e2 < 0`). Proved directly from `|e2| ≤ u`,
+    `|e3| ≤ u`, `u ≤ 1/32` by the same case-bound-and-`nlinarith` technique
+    as `eta_bound` -- no asymptotic `O(u^2)` hand-waving, and this is the
+    step `ETA`'s `0.1 * u` headroom was silently covering (`certkit-62j`). -/
+theorem diag_perturbation_le {u e2 e3 a beta : ℝ} (hu : 0 ≤ u) (hu1 : u ≤ 1 / 32)
+    (h2 : |e2| ≤ u) (h3 : |e3| ≤ u) :
+    |a - beta| * |eta_of e2 e3| ≤ (2.1 * u) * |(a - beta) * (1 + e2)| := by
+  have h2' := abs_le.mp h2
+  have h3' := abs_le.mp h3
+  have hexpand : eta_of e2 e3 = e2 + e3 + e2 * e3 := by unfold eta_of; ring
+  have h1pe2 : (0:ℝ) ≤ 1 + e2 := by linarith [h2'.1]
+  have habsp : |(a - beta) * (1 + e2)| = |a - beta| * (1 + e2) := by
+    rw [abs_mul, abs_of_nonneg h1pe2]
+  have hetabound : |eta_of e2 e3| ≤ (2.1 * u) * (1 + e2) := by
+    rw [hexpand]
+    have t1 := abs_add_le (e2 + e3) (e2 * e3)
+    have t2 := abs_add_le e2 e3
+    have t3 : |e2 * e3| ≤ u * u := abs_mul_le_sq hu h2 h3
+    nlinarith [t1, t2, t3, h2'.1, h2'.2, h3'.1, h3'.2]
+  calc |a - beta| * |eta_of e2 e3| ≤ |a - beta| * ((2.1 * u) * (1 + e2)) :=
+        mul_le_mul_of_nonneg_left hetabound (abs_nonneg _)
+    _ = (2.1 * u) * (|a - beta| * (1 + e2)) := by ring
+    _ = (2.1 * u) * |(a - beta) * (1 + e2)| := by rw [habsp]
+
+/-- **Off-diagonal perturbation.** `btilde^2 = b^2 * (1 + gamma)` (from
+    `sweep_step_backward_bound`), so up to sign `btilde = b * sqrt(1 +
+    gamma)` (`sweep` only ever consumes `b^2`, never `btilde` itself, so the
+    sign choice cannot affect the count or the bound), and the entrywise
+    perturbation is `b * (sqrt(1 + gamma) - 1)`. `GAMMA = 3.1 * u` and the
+    runtime code's `two_u = 2 * u`; `sweep`'s guard `GAMMA / 2 ≤ 2 * u`
+    checks exactly the coefficient relationship this lemma needs. Proved by
+    monotonicity of `Real.sqrt` from `(1 - 2u)^2 ≤ 1 + gamma ≤ (1 + 2u)^2`,
+    not by a transcribed Taylor coefficient -- matches the 60-digit-decimal
+    check recorded in `bd recall backward-error-mechanism`
+    (`|sqrt(1 ± GAMMA) - 1| = 1.550000u` exactly, against the `2u` budget
+    used here, `0.45u` slack). -/
+theorem sqrt_one_add_sub_one_abs_le {gamma u : ℝ} (hu : 0 ≤ u) (hu1 : u ≤ 1 / 32)
+    (hg : |gamma| ≤ 3.1 * u) : |Real.sqrt (1 + gamma) - 1| ≤ 2 * u := by
+  have hg' := abs_le.mp hg
+  have h1mu : (0:ℝ) ≤ 1 - 2 * u := by linarith
+  have h1pg : (0:ℝ) ≤ 1 + gamma := by nlinarith
+  rw [abs_le]
+  constructor
+  · have hlow : (1 - 2 * u) ≤ Real.sqrt (1 + gamma) := by
+      rw [Real.le_sqrt h1mu h1pg]
+      nlinarith [hg'.1]
+    linarith
+  · have hhigh : Real.sqrt (1 + gamma) ≤ 1 + 2 * u := by
+      rw [Real.sqrt_le_left (by linarith : (0:ℝ) ≤ 1 + 2 * u)]
+      nlinarith [hg'.2]
+    linarith
+
 end Certkit

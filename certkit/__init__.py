@@ -5,7 +5,10 @@ in rigorous interval arithmetic and returns VERIFIED or ABSTAIN. The two sides
 share only the certificate format.
 """
 
-from .backward_error import count_eigenvalues_below_backward
+from .backward_error import (
+    count_eigenvalues_below_backward,
+    count_eigenvalues_below_backward_banded,
+)
 from .banded import count_eigenvalues_below_banded
 from .checker import (
     Verdict,
@@ -33,6 +36,7 @@ __all__ = [
     "count_eigenvalues_below",
     "count_eigenvalues_below_banded",
     "count_eigenvalues_below_backward",
+    "count_eigenvalues_below_backward_banded",
     "Iv",
     "IntervalError",
     "Operator",
