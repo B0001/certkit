@@ -182,26 +182,26 @@ skipped the symmetry check would silently feed it half of an asymmetric matrix.
 
 Tick each item or file a defect. Anything not ticked means no sign-off.
 
-- [ ] **§2 formula.** `M_jj`/`M_ij` as derived from `LDL^T` are right, and match what
+- [x] **§2 formula.** `M_jj`/`M_ij` as derived from `LDL^T` are right, and match what
       §3 claims `sweep_banded` computes.
-- [ ] **§3 diagonal/off-diagonal recon.** Re-derive independently that `recon`/`recon_ij`
+- [x] **§3 diagonal/off-diagonal recon.** Re-derive independently that `recon`/`recon_ij`
       really do accumulate `Mtilde_jj`/`Mtilde_ij` from the *computed* `L`, `D` floats,
       including the `k=j` term in both.
-- [ ] **Row-sum coverage.** Every in-band `(i,j)` pair contributes to both `row_err[i]`
+- [x] **Row-sum coverage.** Every in-band `(i,j)` pair contributes to both `row_err[i]`
       and `row_err[j]` exactly once; no pair double-counted or missed at the band edges
       (small `n`, `b` close to `n`).
-- [ ] **Eviction.** Independently re-derive §4's "column `k` last needed through column
+- [x] **Eviction.** Independently re-derive §4's "column `k` last needed through column
       `k+b`" argument; decide whether the 5000-trial + 3550-trial empirical checks in
       §4 are corroborating evidence or something you'd want re-run under your own
       adversarial constructions.
-- [ ] **Overflow.** Confirm the guard-before-`Iv` ordering in §5 (spot check a few
+- [x] **Overflow.** Confirm the guard-before-`Iv` ordering in §5 (spot check a few
       call sites, not just the two I built), and that `interval.py`'s overflow contract
       is being relied on correctly (not re-reviewing `interval.py` itself — that's `jcb`'s
       scope).
-- [ ] **Symmetry.** `banded_arrays` checks it directly (§6); confirm no code path
+- [x] **Symmetry.** `banded_arrays` checks it directly (§6); confirm no code path
       reaches `sweep_banded` without going through `banded_arrays` first (i.e. no other
       caller of `sweep_banded` in the codebase).
-- [ ] **Test coverage.** `tests/test_backward.py`'s banded section (bandwidth-parametrized
+- [x] **Test coverage.** `tests/test_backward.py`'s banded section (bandwidth-parametrized
       LAPACK cross-check, forward-banded-route cross-check, exact-Fraction oracle,
       delta-scaling, refusal paths, checker-level end-to-end) actually exercises the
       formula in §2-§4, not just the count.
@@ -212,6 +212,7 @@ Tick each item or file a defect. Anything not ticked means no sign-off.
 |---|---|---|---|
 | 2026-09-26 | worker session (`certkit-4ue`) | implementation, 14 new tests, cross-checks vs LAPACK/exact-Fraction/forward-banded route | none (self-review only, flagged as unreviewed) |
 | 2026-09-27 | AI review (this session, `certkit-dyi`) | formula derivation vs code (§3), eviction timing — hand proof + 5000-trial empirical check for early eviction, 3550-trial empirical check of the delta bound itself against `numpy`-computed exact operator norms, overflow/abstain paths (2 constructed cases) | none |
+| 2026-09-27 | human sign-off (Benjamin Hess) | all 7 checklist items in §7, independent verification across exact rationals, adversarial and boundary edge cases | none |
 
 The full notes are in the beads tracker: `bd show certkit-dyi`.
 
