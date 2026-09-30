@@ -54,25 +54,27 @@ the conclusion.** Softening a stated limitation because a metric moved is a
 regression even when every test still passes.
 
 **Do not overstate the Lean side, but re-measure before you repeat this
-paragraph.** `lean/Certkit/Soundness.lean` states seven soundness obligations
-against mathlib4. As of a fresh check this session (`grep -n sorry
-lean/Certkit/Soundness.lean` for an actual `sorry` tactic, plus `cd lean &&
-lake build Certkit`), all seven — `rayleigh_ritz_min`,
-`residual_encloses_some_eigenvalue`, `temple_lower`, `inertia_count_below`,
-`gershgorin_lower`, `weyl_shift`, `sweep_backward_bound` — compile with zero
-`sorry`, and `lake build Certkit` succeeds as a whole (8804/8804 jobs; only
-unused-variable/section lints, no errors). That is a fact about this file,
-not the claim "the checker is proved sound end-to-end" — that also requires
-the Python side to actually implement what each theorem states, which is a
-separate, ongoing correspondence question. In particular `weyl_shift`'s own
-doc comment flags a specific, currently uncovered gap — the relation between
-the entrywise/row-sum bound `sturm_be` computes at runtime and the L2
-operator norm `weyl_shift` is stated against — that a compiling proof does
-not resolve. Do not trust this paragraph's numbers either: re-grep the file
-for `sorry` (matching only an actual tactic use, not the word in a doc
-comment) and re-run `lake build Certkit` before repeating them, and check
-`bd show` on any bead cited here rather than assuming the status printed at
-the time this paragraph was last edited still holds.
+paragraph.** `lean/Certkit/Soundness.lean` states nine soundness obligations
+against mathlib4 — see README.md's "The Lean side" section for the full
+named list, which resists drift better than repeating the names here. As of
+a fresh check this session (`grep -n sorry lean/Certkit/Soundness.lean` for
+an actual `sorry` tactic, plus `cd lean && lake build Certkit`), all nine
+compile with zero `sorry`, and `lake build Certkit` succeeds as a whole
+(8805/8805 jobs; only unused-variable/section lints, no errors). That is a
+fact about this file, not the claim "the checker is proved sound
+end-to-end" — that also requires the Python side to actually implement what
+each theorem states, which is a separate, ongoing correspondence question.
+The gap `weyl_shift`'s doc comment used to flag — relating the entrywise/
+row-sum bound `sturm_be` computes at runtime to the L2 operator norm
+`weyl_shift` is stated against — is now closed elsewhere in the same file, by
+`l2_opNorm_le_rowSum_of_isHermitian` plus `sweep_row_bound` (see the module
+header, `lean/Certkit/Soundness.lean:5-27`); `weyl_shift`'s own doc comment
+says so explicitly. Do not trust this paragraph's numbers either: re-grep the
+file for `sorry` (matching only an actual tactic use, not the word in a doc
+comment), re-run `lake build Certkit`, and re-read the doc comments before
+repeating any of this, and check `bd show` on any bead cited here rather than
+assuming the status printed at the time this paragraph was last edited still
+holds.
 
 ## Known baseline — do not mistake this for your own breakage
 
@@ -96,12 +98,16 @@ below are standing context, not a substitute, and can go stale between
 sessions (they have before: see `certkit-t2k`, `certkit-bba`). Verify any
 bead ID mentioned here against `bd show` before trusting its status.
 
-- **`certkit-jcb` cannot be done by you.** It asks for a *second human* to
-  read `interval.py` and `backward_error.py` against their derivations. A
+- **`certkit-jcb` is closed** — human soundness sign-off completed 2026-09-27
+  (all 9 checklist items verified, per its close reason). While it was open it
+  could not be done by a worker session: it asked for a *second human* to
+  read `interval.py` and `backward_error.py` against their derivations, and a
   worker session reviewing code written by a model is not an independent
-  reviewer, and closing it would destroy the only record that the soundness
-  argument is unreviewed. Leave it open — do not claim it, regardless of
-  whether `bd show certkit-jcb` currently reports it open or in_progress.
+  reviewer. Do not reopen or reclaim it on the assumption that a fresh
+  worker's review would satisfy the same requirement — that sign-off has to
+  come from a human again if it ever needs redoing. Verify with
+  `bd show certkit-jcb` before trusting either this bullet or your own memory
+  of it.
 - **`certkit-ph1` (coverage cliff) is closed**, infeasible-for-now after six
   worker sessions ruled out every concretely-named matrix-free counting rule
   (adversarial subspace-oracle impossibility, term-count exploitation,
@@ -109,8 +115,13 @@ bead ID mentioned here against `bd show` before trusting its status.
   close notes and `sandbox-handoffs/certkit-ph1.md`). Do not reopen or
   reattempt it from scratch. The one thread it left genuinely untried —
   certified tensor-network/MPO methods with interval-bounded truncation
-  error — is now its own bead, `certkit-k2j`; work that one instead if you
-  want to continue this line.
+  error — got its own bead, `certkit-k2j`, which is **also closed**
+  (infeasible-for-now: the repo's permitted operator shapes place the general
+  counting-rule obligation in QMA-complete territory, confirmed by a
+  disorder-averaged entanglement-growth measurement — see
+  `sandbox-handoffs/certkit-k2j.md`). Every concretely-named avenue for the
+  coverage cliff is now exhausted; do not reopen either bead without a
+  genuinely new idea not already ruled out in those two handoffs.
 - **`certkit-487` (sector-scope bug) is closed.** It was a scope bug, not a
   soundness bug — the checker correctly abstains on a sector-local claim that
   doesn't separate the full spectrum. The invariant is documented (README,

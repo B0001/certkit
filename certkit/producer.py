@@ -439,13 +439,13 @@ def certify_lambda_min_hermitian(operator: Any, *, slack: float = 1e-9) -> tuple
     """Gershgorin + Hermitian Rayleigh: the matrix-free route for complex
     Hermitian operators, checked by `hermitian_gershgorin_rayleigh`.
 
-    This is the only route complex Hermitian operators have today -- there is
-    no complex analogue of the interval-LDL^T inertia count yet (it would
-    need outward-rounded `CIv` pivoting, which is unimplemented and out of
-    scope for certkit-3ta; see the README's Complex Hermitian operators
-    section). A bad trial vector, exactly as in `certify_lambda_min_
-    matrixfree`, only ever costs coverage: the checker recomputes mu and the
-    Gershgorin floor from the operator and witness alone.
+    The loose route: no gap, no factorisation, works on any complex Hermitian
+    operator this module can build. `certify_lambda_min_hermitian_temple_
+    inertia` below is the tight analogue, needing a gap and an O(n^3) route,
+    exactly the real `gershgorin_rayleigh`/`temple_inertia` split. A bad trial
+    vector, exactly as in `certify_lambda_min_matrixfree`, only ever costs
+    coverage: the checker recomputes mu and the Gershgorin floor from the
+    operator and witness alone.
     """
     enc = _as_encoding_hermitian(operator)
     n = enc["n"]
@@ -476,6 +476,69 @@ def certify_lambda_min_hermitian(operator: Any, *, slack: float = 1e-9) -> tuple
         "vector": [
             {"re": f2h(float(z.real)), "im": f2h(float(z.imag))} for z in x
         ],
+    }
+    claim = {
+        "kind": "lambda_min_enclosure",
+        "enclosure": {"lo": f2h(lower - pad), "hi": f2h(mu + pad)},
+    }
+    return _cert(enc, claim, witness), enc
+
+
+def _temple_inertia_bracket_hermitian(apply, x, beta: float, slack: float):
+    """The complex analogue of `_temple_inertia_bracket`: mu, lower bound, and
+    pad for a complex Temple+inertia certificate around `x`. Same structure,
+    `np.vdot` (conjugate-linear in its first argument) in place of `@`, and a
+    `.real` on every inner product -- each is provably real for Hermitian A
+    (see `certify_lambda_min_hermitian`'s docstring and
+    `checker._rule_hermitian_gershgorin_rayleigh`'s derivation), and the
+    checker re-derives that itself; this is only the untrusted producer side.
+    """
+    ax = apply(x)
+    nx2 = float(np.vdot(x, x).real)
+    mu = float(np.vdot(x, ax).real) / nx2
+    r = ax - mu * x
+    rho2 = float(np.vdot(r, r).real) / nx2
+
+    gap = beta - mu
+    if gap > 0 and np.isfinite(rho2 / gap):
+        lower = mu - rho2 / gap
+    else:
+        lower = mu - 1.0 - abs(mu)
+
+    pad = pad_claim(mu, slack, len(x), mu - lower)
+    return mu, lower, pad
+
+
+def certify_lambda_min_hermitian_temple_inertia(
+    operator: Any, *, slack: float = 1e-9
+) -> tuple[dict, dict]:
+    """Temple + inertia for complex Hermitian operators (certkit-1y7): the
+    tight route, checked by `hermitian_temple_inertia`. The complex analogue
+    of `certify_lambda_min`, using `count_eigenvalues_below_hermitian`'s
+    interval-LDL^H inertia count to discharge the gap.
+    """
+    enc = _as_encoding_hermitian(operator)
+    n = enc["n"]
+    a = np.array(
+        [
+            [complex(float.fromhex(e["re"]), float.fromhex(e["im"])) for e in row]
+            for row in enc["rows"]
+        ]
+    )
+    vals, vecs = np.linalg.eigh(a)
+    lam1, lam2 = float(vals[0]), float(vals[1])
+    x = vecs[:, 0]
+
+    # Gap parameter: anywhere strictly between lambda_1 and lambda_2. The
+    # checker discharges it by inertia count, so a bad guess costs coverage,
+    # never soundness -- exactly `certify_lambda_min`'s beta choice.
+    beta = 0.5 * (lam1 + lam2)
+
+    mu, lower, pad = _temple_inertia_bracket_hermitian(lambda v: a @ v, x, beta, slack)
+    witness = {
+        "rule": "hermitian_temple_inertia",
+        "vector": [{"re": f2h(float(z.real)), "im": f2h(float(z.imag))} for z in x],
+        "beta": f2h(beta),
     }
     claim = {
         "kind": "lambda_min_enclosure",

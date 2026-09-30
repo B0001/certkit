@@ -270,12 +270,14 @@ class PauliSumReal(Operator):
 class DenseHermitianComplex(Operator):
     """A complex Hermitian operator, stored as explicit `(re, im)` rows.
 
-    Only the matrix-free route is available for this kind today:
-    `interval_rows`/`dense_rows` are deliberately left at the base class's
-    `None` rather than half-supporting a route (interval LDL^T inertia
-    counting) that has no complex analogue implemented yet -- see
-    checker.py's `hermitian_gershgorin_rayleigh` and the README's Complex
-    Hermitian operators section.
+    Two routes are available for this kind: the matrix-free
+    `hermitian_gershgorin_rayleigh`, and -- since certkit-1y7 -- the tight
+    `hermitian_temple_inertia` route, which needs `interval_rows()` (`CIv`
+    rows, gated by `DENSE_LIMIT` exactly like `DenseSymmetric.interval_rows`)
+    for its interval-LDL^H inertia count
+    (`checker.count_eigenvalues_below_hermitian`). `dense_rows()` is left at
+    the base class's `None`: nothing in this file needs a float
+    materialisation of a complex operator today.
     """
 
     kind = "dense_hermitian_complex"
@@ -298,6 +300,9 @@ class DenseHermitianComplex(Operator):
 
     def row(self, i: int) -> dict[int, CIv]:
         return {j: self._civ[i][j] for j in range(self.n)}
+
+    def interval_rows(self) -> list[list[CIv]] | None:
+        return self._civ if self.n <= DENSE_LIMIT else None
 
     def check_symmetric(self) -> None:
         """Raise SchemaError unless the operator is exactly Hermitian.

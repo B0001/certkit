@@ -132,6 +132,7 @@ sturm_be             the same claim, via backward error with a runtime bound
 gershgorin_rayleigh  loose; needs no gap at all, and is fully matrix-free
 gen_gershgorin_rayleigh  the pencil A x = lambda S x; needs S provably PD
 hermitian_gershgorin_rayleigh  gershgorin_rayleigh's complex Hermitian analogue
+hermitian_temple_inertia  temple_inertia's complex Hermitian analogue; interval LDL^H
 combine              a derivation node: two one-sided bounds, no arithmetic
 gershgorin           every eigenvalue is at least `bound`; witness-free
 rayleigh             lambda_min is at most `bound`, from a trial vector
@@ -226,18 +227,29 @@ matrix-free like its real counterpart:
   eigenvalues are both exactly real, so "the smallest disc's left endpoint is
   a sound global floor" transfers verbatim from the real case.
 
-What is **not** here: a complex analogue of `temple_inertia`/`sturm`. Those
-routes need an interval LDL^T factorisation, and pivoting through outward-rounded
-`CIv` arithmetic is a materially different, unimplemented piece of work — real
-research, not a small extension of the real banded solver — so it is out of
-scope for this slice. `dense_hermitian_complex` deliberately leaves
-`interval_rows`/`dense_rows` unset rather than half-supporting a factorisation
-route that does not exist, and `hermitian_gershgorin_rayleigh` is the only
-rule registered against it. A rule built for one arithmetic type invoked
-against the other operator kind — `hermitian_gershgorin_rayleigh` against a
-real operator, or any real rule against a complex one — abstains cleanly
-rather than crashing on the type mismatch; see the dispatch guard in
-`checker.py` and `tests/test_complex_hermitian.py`.
+`hermitian_temple_inertia` is `temple_inertia`'s complex analogue: an interval
+LDL^H factorisation of `A - beta*I` over `CIv`, counting sign-determined
+pivots via Sylvester's law of inertia for Hermitian congruence (the same
+theorem `count_eigenvalues_below`'s docstring invokes, with an invertible
+complex `L` in place of a real one). The one new primitive it needed,
+`CIv.scale(r: Iv)` (multiplication by a *real* interval scalar), is the
+real-scalar sibling of the `CIv.__truediv__` restriction to real divisors
+that already existed. Each diagonal pivot is built entirely from real `Iv`
+arithmetic — the off-diagonal magnitude term is `sqnorm`, proven nonnegative
+by the same sum-of-squares argument the rest of the codebase already relies
+on, not from an imaginary part that happens to round to an interval
+containing zero — so a pivot's sign is exactly as well-determined as any real
+pivot in `count_eigenvalues_below`. `beta` is discharged the same way
+`temple_inertia` discharges it: inline, by counting exactly one eigenvalue
+below it on the *full* operator, never trusted from the witness. It is
+gated by `DENSE_LIMIT` exactly like the real dense backend
+(`dense_hermitian_complex.interval_rows()`), and it is `dense_hermitian_complex`'s
+only other registered rule alongside `hermitian_gershgorin_rayleigh`. A rule
+built for one arithmetic type invoked against the other operator kind —
+either complex rule against a real operator, or any real rule against a
+complex one — abstains cleanly rather than crashing on the type mismatch;
+see the dispatch guard in `checker.py` and `tests/test_complex_hermitian.py`
+/ `tests/test_complex_temple_inertia.py`.
 
 ## Counting without a dense factorisation
 
@@ -481,7 +493,7 @@ certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
 certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
 lean/Certkit/         soundness obligations in Lean 4       9 of 9 proved
-tests/                199 tests: fuzz, backends, composition, counting, adversarial, boundary
+tests/                229 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
 
 The trust boundary is enforced mechanically, not by comment.
@@ -653,11 +665,22 @@ and the checker refuses it, correctly.
 
 ## Not done yet
 
-- A tight (Temple/inertia) route for complex Hermitian operators — only the
-  matrix-free Gershgorin + Rayleigh route exists (`hermitian_gershgorin_rayleigh`);
-  see "Complex Hermitian operators" above. It needs an interval LDL^T over `CIv`,
-  which is unimplemented.
-- Proofs on the Lean side for the banded backward-error route (certkit-4ue): the
-  existing `sweep_backward_bound` covers only the tridiagonal derivation.
+- A Lean formalization of the complex-Hermitian tight route's soundness
+  obligations (interval LDL^H reconstruction correctness, Sylvester's law of
+  inertia for Hermitian congruence) — `hermitian_temple_inertia` is
+  implemented and tested (`tests/test_complex_temple_inertia.py`) but, unlike
+  the real `temple_inertia`/`sturm` routes, has no Lean counterpart yet; see
+  "Complex Hermitian operators" above.
+- `certkit-sp1` closed the Lean gap for the banded backward-error route's
+  real-number claims (`BandedBackwardError.lean`: `LDL^T` reconstruction
+  formula correctness and row-sum coverage, generalizing `sweep_row_bound`
+  from bandwidth 1 to general bandwidth). Not covered, by that bead's own
+  scoping and consistent with `sweep_row_bound` itself: whether
+  `sweep_banded`'s `Iv`-arithmetic loop, in whatever order it visits pairs,
+  computes an outward-rounded enclosure of that real-number sum, and whether
+  `lmat`'s eviction has already discarded an entry the sum needs before it is
+  read — both are Python-loop-faithfulness claims, stay covered by
+  `REVIEW-dyi.md`'s human/empirical review and `tests/test_backward.py`'s
+  banded section, not by a Lean theorem.
 - A count rule that works matrix-free, which is what would let a large Pauli
   Hamiltonian use `temple_ref` instead of falling back to Gershgorin.

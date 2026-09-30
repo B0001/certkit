@@ -60,13 +60,20 @@ Two gaps sit between the two, and both are trusted:
    `count_eigenvalues_below` ↔ `inertia_count_below`, and so on). Nothing
    mechanically enforces that the Python still does what the theorem says.
    Change either side and the correspondence can rot silently.
-2. **One named, still-uncovered obligation.** `sweep_backward_bound`'s own doc
-   comment flags it: that the row-sums `backward_error.sweep` accumulates at
-   runtime actually dominate `‖A − Ã‖_∞` is an `Iv`-bookkeeping fact about a
-   Python loop, and is not a Lean obligation. The norm-inequality half is
-   closed by `l2_opNorm_le_rowSum_of_isHermitian`; this half is not. It is
-   tracked as its own piece of work and is the single largest hole in the
-   chain.
+2. **The row-sum step is proved.** `sweep_backward_bound`'s doc comment used
+   to name this as the last open link; `sweep_row_bound` (`certkit-62j`)
+   closes it: given the `eta`/`gamma` per-step bounds `sweep_backward_bound`
+   proves, it shows `ETA*|p| + two_u*(|b_prev|+|b_next|)` — the quantity
+   `backward_error.sweep` accumulates at runtime — dominates the true row sum
+   of `‖A − Ã‖_∞`. Combined with `l2_opNorm_le_rowSum_of_isHermitian`
+   (`‖·‖_∞` dominates the `‖·‖_2` `weyl_shift` needs), both norm-inequality
+   halves are now closed. What remains is narrower and, by
+   `sweep_row_bound`'s own doc comment, explicitly *not* a Lean obligation:
+   that `backward_error.sweep`'s `Iv`-arithmetic loop computes an
+   outward-rounded enclosure of the real-number bound the theorem proves —
+   a fact about `Interval.lean`'s already-proved soundness contract applied
+   to a specific expression, checked by the Python test suite, not by this
+   file.
 
 ## 5. Scope limits that are not assumptions
 

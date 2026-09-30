@@ -118,6 +118,80 @@ def count_eigenvalues_below(rows: Sequence[Sequence[Any]], beta: float) -> int:
     return sum(1 for x in d if x.is_negative)
 
 
+def count_eigenvalues_below_hermitian(rows: Sequence[Sequence[Any]], beta: float) -> int:
+    """Number of eigenvalues of the complex Hermitian operator strictly below
+    `beta`. The complex analogue of `count_eigenvalues_below` (certkit-1y7):
+    interval LDL^H of (A - beta*I) in place of LDL^T, plus Sylvester's law of
+    inertia for Hermitian congruence.
+
+    Rows may be raw complex numbers or `CIv`; `CIv` is what a matrix-free
+    backend can honestly supply.
+
+    Derivation. For Hermitian A, unit-lower-triangular L (complex, so
+    invertible -- its determinant is 1) and real diagonal D with
+    A = L D L^H: comparing entry (i, j) for i > j against the sum
+    A[i][j] = sum_{k<=j} L[i][k] D[k] conj(L[j][k]) (only terms with k <= j
+    survive because L is lower triangular, so L[j][k] = 0 for k > j, and
+    L[j][j] = 1) gives
+
+        L[i][j] = (A[i][j] - sum_{k<j} L[i][k] D[k] conj(L[j][k])) / D[j]
+
+    and the same comparison at (j, j), using L[j][j] = 1, gives
+
+        D[j] = A[j][j] - sum_{k<j} |L[j][k]|^2 D[k]
+
+    exactly the real algorithm with `conj(...)` inserted and the squared
+    term written as a magnitude so it is provably real. Sylvester's law of
+    inertia extends to Hermitian congruence: A and D = L^{-1} A (L^H)^{-1}
+    have the same number of negative eigenvalues, because L is invertible
+    (congruence by an invertible matrix cannot change the signature of a
+    Hermitian form -- the same theorem `count_eigenvalues_below`'s docstring
+    invokes for the real, L-real case). So if every D[j] is sign-determined,
+    the count of negative D[j] *is* the count of negative eigenvalues of
+    A - beta*I, i.e. of eigenvalues of A strictly below beta.
+
+    Soundness of the pivot arithmetic: `|L[j][k]|^2` is computed as
+    `sqnorm([L[j][k].re, L[j][k].im])` -- proved nonnegative directly, by the
+    same sum-of-squares argument `sqnorm`/`csqnorm` already carry, not by
+    relying on an imaginary part rounding to contain zero. `D[j]` is
+    therefore built entirely from real `Iv` arithmetic (never `CIv`), so its
+    sign is as well-defined as any real pivot in `count_eigenvalues_below`.
+    The off-diagonal update needs one genuinely complex term,
+    `L[i][k] * conj(L[j][k])`, scaled by the real pivot `D[k]` via
+    `CIv.scale` (exact for a real scalar: no division, no dependency-problem
+    widening beyond what the scaled operand already carries) and divided by
+    the real pivot `D[j]` via `CIv.__truediv__`, which was already built and
+    proven for exactly this case (a real divisor).
+
+    Raises IntervalError if a pivot cannot be sign-determined (the honest
+    outcome for a near-degenerate gap).
+    """
+    n = len(rows)
+    b = Iv.exact(beta)
+    m = [[v if isinstance(v, CIv) else CIv.exact(v) for v in rows[i]] for i in range(n)]
+    for i in range(n):
+        m[i][i] = CIv(m[i][i].re - b, m[i][i].im)
+
+    d: list[Iv] = []
+    lmat: list[list[CIv]] = [[CZERO] * n for _ in range(n)]
+    for j in range(n):
+        s = m[j][j].re
+        for k in range(j):
+            ljk = lmat[j][k]
+            s = s - sqnorm([ljk.re, ljk.im]) * d[k]
+        if s.contains_zero:
+            raise IntervalError(
+                f"pivot {j} straddles zero; inertia not determined (gap too tight)"
+            )
+        d.append(s)
+        for i in range(j + 1, n):
+            t = m[i][j]
+            for k in range(j):
+                t = t - lmat[i][k].scale(d[k]) * lmat[j][k].conj()
+            lmat[i][j] = t / s
+    return sum(1 for x in d if x.is_negative)
+
+
 # -- quantities re-derived from the witness alone -------------------------
 def _rayleigh_and_residual(op: Operator, x: Sequence[float]) -> tuple[Iv, Iv]:
     """Return (mu, rho2): enclosures of x'Ax/x'x and ||Ax - mu x||^2/||x||^2.
@@ -134,6 +208,24 @@ def _rayleigh_and_residual(op: Operator, x: Sequence[float]) -> tuple[Iv, Iv]:
     mu = dot(xv, ax) / nx2
     resid = [ax[i] - mu * xv[i] for i in range(len(xv))]
     return mu, sqnorm(resid) / nx2
+
+
+def _hermitian_rayleigh_and_residual(op: Operator, x: Sequence[CIv]) -> tuple[Iv, Iv]:
+    """The complex analogue of `_rayleigh_and_residual`: enclosures of
+    Re<x|Ax>/<x|x> and ||Ax - mu x||^2/<x|x>, for complex Hermitian A.
+
+    mu is real by the same argument `_rule_hermitian_gershgorin_rayleigh`
+    gives for `cdot(x, ax).re`; the residual is formed against that real
+    interval mu via `CIv.scale`, so, exactly as in the real version, the
+    enclosure is valid for every real value the Rayleigh quotient could take.
+    """
+    nx2 = csqnorm(x)
+    if not nx2.is_positive:
+        raise IntervalError("witness vector is (or may be) zero")
+    ax = op.apply(x)
+    mu = cdot(x, ax).re / nx2
+    resid = [ax[i] - x[i].scale(mu) for i in range(len(x))]
+    return mu, csqnorm(resid) / nx2
 
 
 def _gershgorin_lower(op: Operator) -> Iv:
@@ -329,6 +421,22 @@ def _temple(op, x, beta, claim_lo, claim_hi, rule, deps=()) -> Verdict:
     `tests/test_sector_scope.py` (certkit-487) for a constructed case.
     """
     mu, rho2 = _rayleigh_and_residual(op, x)
+    denom = Iv.exact(beta) - mu
+    if not denom.is_positive:
+        return _abstain("Rayleigh quotient is not provably below beta", rule=rule)
+    return _implies(claim_lo, claim_hi, (mu - rho2 / denom).lo, mu.hi,
+                    "lambda_min_enclosure", rule, deps)
+
+
+def _temple_complex(op, x, beta, claim_lo, claim_hi, rule, deps=()) -> Verdict:
+    """The complex analogue of `_temple`, via `_hermitian_rayleigh_and_residual`
+    in place of `_rayleigh_and_residual`. Same inequality, same "beta is the
+    caller's responsibility, and is discharged against the full operator's
+    spectrum, never a subspace" argument -- `hermitian_temple_inertia` below
+    discharges it by `count_eigenvalues_below_hermitian` on the full operator,
+    exactly mirroring `_rule_temple_inertia`.
+    """
+    mu, rho2 = _hermitian_rayleigh_and_residual(op, x)
     denom = Iv.exact(beta) - mu
     if not denom.is_positive:
         return _abstain("Rayleigh quotient is not provably below beta", rule=rule)
@@ -560,6 +668,42 @@ def _rule_hermitian_gershgorin_rayleigh(op, claim, witness, ctx) -> Verdict:
     return _implies(lo, hi, low.lo, mu.hi, "lambda_min_enclosure", "hermitian_gershgorin_rayleigh")
 
 
+def _rule_hermitian_temple_inertia(op, claim, witness, ctx) -> Verdict:
+    """Temple with the gap discharged inline by a complex inertia count
+    (certkit-1y7). The complex analogue of `temple_inertia`: same structure,
+    `count_eigenvalues_below_hermitian` (interval LDL^H) in place of
+    `count_eigenvalues_below` (interval LDL^T), and `_temple_complex` in
+    place of `_temple`.
+
+    beta is not taken on faith here either. If exactly one eigenvalue of the
+    full complex Hermitian operator lies below beta then beta <= lambda_2,
+    and that count comes from `op.interval_rows()` -- `CIv` rows, gated by
+    `DENSE_LIMIT` exactly like the real dense backend. A backend that refuses
+    to materialise (there is currently only one complex backend, and it
+    always materialises up to `DENSE_LIMIT`, but the check is here on
+    principle, matching `_rule_temple_inertia`) gets an honest abstention,
+    not a weakened rule.
+    """
+    x = _cwitness_vector(witness, op)
+    lo, hi = _enclosure(claim)
+    beta = h2f(witness.get("beta"))
+
+    rows = op.interval_rows()
+    if rows is None:
+        return _abstain(
+            f"backend {op.kind!r} (n={op.n}) will not materialise; inertia "
+            "counting unavailable -- use hermitian_gershgorin_rayleigh",
+            rule="hermitian_temple_inertia",
+        )
+    below = count_eigenvalues_below_hermitian(rows, beta)
+    if below != 1:
+        return _abstain(
+            f"gap parameter not discharged: {below} eigenvalues lie below beta, need exactly 1",
+            rule="hermitian_temple_inertia",
+        )
+    return _temple_complex(op, x, beta, lo, hi, "hermitian_temple_inertia")
+
+
 def _rule_gershgorin(op, claim, witness, ctx) -> Verdict:
     """Every eigenvalue is at least `bound`. Witness-free: the operator is it."""
     bound = h2f(claim.get("bound"))
@@ -692,6 +836,9 @@ RULES = {
     "hermitian_gershgorin_rayleigh": (
         "lambda_min_enclosure", _rule_hermitian_gershgorin_rayleigh, True,
     ),
+    "hermitian_temple_inertia": (
+        "lambda_min_enclosure", _rule_hermitian_temple_inertia, True,
+    ),
     "gershgorin": ("spectrum_lower_bound", _rule_gershgorin, False),
     "rayleigh": ("lambda_min_upper_bound", _rule_rayleigh, True),
     "inertia": ("eigenvalue_count_below", _rule_inertia, False),
@@ -707,7 +854,7 @@ RULES = {
 # between them raises), but it would crash `check()` uncaught instead of
 # abstaining, which `_verify_uncached`'s dispatch guard below exists to
 # prevent.
-COMPLEX_RULES = frozenset({"hermitian_gershgorin_rayleigh"})
+COMPLEX_RULES = frozenset({"hermitian_gershgorin_rayleigh", "hermitian_temple_inertia"})
 COMPLEX_OPERATOR_KINDS = frozenset({"dense_hermitian_complex"})
 
 

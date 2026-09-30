@@ -18,6 +18,20 @@
   enclosure of the real-number bound `sweep_row_bound` proves -- a fact about
   `Interval.lean`'s already-proved soundness contract applied to a specific
   expression, checked by the Python test suite, not a new Lean obligation.
+
+  `BandedBackwardError.lean` (`certkit-sp1`) is the analogous pair of
+  theorems for the banded (bandwidth `> 1`) route,
+  `backward_error.sweep_banded`: `bandedRecon_diag` / `bandedRecon_offdiag`
+  are the `LDLᵀ` reconstruction formula's correctness (`REVIEW-dyi.md` §2),
+  and `banded_row_err_eq_row_sum` is `sweep_row_bound`'s row-sum-coverage
+  argument generalised from bandwidth 1 to general `b`. That route needs no
+  analog of `sweep_backward_bound`: it never counts per-operation rounding at
+  all, instead auditing the actual `L`, `D` floats' reconstruction directly
+  against `A`'s exact entries via `Iv`. Same exclusion as above applies here
+  too, plus one more named in `REVIEW-dyi.md` §7 and `banded_row_err_eq_row_sum`'s
+  own doc comment: `lmat`'s eviction is a Python-loop-faithfulness concern,
+  not a real-number claim, and stays covered by that file's human/empirical
+  review rather than by a Lean theorem.
   Every theorem compiling with no `sorry` is a fact about this file;
   it is not the same claim as "the checker is proved sound end-to-end" --
   that also requires the Python side to actually implement what each theorem
@@ -38,6 +52,12 @@
                                                      +   l2_opNorm_le_rowSum_of_isHermitian
                                                      +   sweep_backward_bound
                                                      +   sweep_row_bound
+    backward_error.count_eigenvalues_below_backward_banded
+                                                     <->  inertia_count_below
+                                                     +   weyl_shift
+                                                     +   l2_opNorm_le_rowSum_of_isHermitian
+                                                     +   bandedRecon_diag / bandedRecon_offdiag
+                                                     +   banded_row_err_eq_row_sum
     checker._rule_gershgorin_rayleigh  lower bound  <->  gershgorin_lower
 
   A third obligation -- that interval arithmetic on doubles encloses the

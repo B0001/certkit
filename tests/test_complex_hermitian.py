@@ -5,10 +5,9 @@ operators: a complex interval type (`CIv`, in interval.py), an exact
 Hermitian symmetry check (`DenseHermitianComplex.check_symmetric`), and one
 matrix-free certification route, `hermitian_gershgorin_rayleigh` -- the
 complex analogue of `gershgorin_rayleigh`, generalizing the real inner
-product to the Hermitian one. There is deliberately no complex analogue of
-the Temple/inertia route here: that needs an interval LDL^T over `CIv`,
-which is unimplemented and out of scope for this bead (see README's
-"Complex Hermitian operators" section).
+product to the Hermitian one. The complex analogue of the Temple/inertia
+route (an interval LDL^H over `CIv`) was out of scope for this bead and is
+covered separately, in `test_complex_temple_inertia.py` (certkit-1y7).
 
 What this file has to show, matching the repo's standard: soundness against
 an independent oracle (`numpy.linalg.eigvalsh` on the same matrix), the

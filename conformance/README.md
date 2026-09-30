@@ -36,6 +36,7 @@ consumer checks anything. Stdlib only, no numpy.
 |---|---|---|
 | `verified_dense_lambda_min` | VERIFIED | Baseline: a correct enclosure on a 6×6 dense symmetric operator. |
 | `verified_composed_bundle` | VERIFIED | A temple certificate discharging its gap hypothesis through a referenced count certificate. |
+| `verified_banded_sturm_be` | VERIFIED | A correct count claim on a genuinely banded (bandwidth 3) operator, verified through `sturm_be`'s `NotTridiagonal` fallback to the banded backward-error route. |
 | `abstain_enclosure_shrunk` | ABSTAIN `tighter` | The witness does not support the claim — the headline failure class. |
 | `abstain_enclosure_shifted` | ABSTAIN | Enclosure moved off the true eigenvalue. |
 | `abstain_unsealed_mutation` | ABSTAIN | Body altered without re-sealing; the hash must catch it before any mathematics runs. |
@@ -44,13 +45,14 @@ consumer checks anything. Stdlib only, no numpy.
 | `abstain_unknown_rule` | ABSTAIN | Unknown rule names are refused, never ignored. |
 | `abstain_garbage_input` | ABSTAIN | Malformed input abstains rather than crashing. |
 | `abstain_dependency_missing` | ABSTAIN `not in the bundle` | Broken dependency: the referenced count certificate is absent. |
+| `abstain_banded_sturm_be_tampered` | ABSTAIN `re-derived` | A lying count claim on the same banded `sturm_be` route, not just its tridiagonal fast path. |
 | `abstain_forged_cycle` | ABSTAIN | A cycle, buildable only by lying about content hashes. |
 | `abstain_self_reference` | ABSTAIN | A cycle of length one. |
 
 Cases carrying a `reason_contains` in `manifest.json` must abstain *for that
 reason*. A checker that refuses everything indiscriminately still fails them —
 verified by running the suite against a stub that always exits 1, which passes
-only 7 of 12.
+only 7 of 14.
 
 ## Regenerating
 

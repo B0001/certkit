@@ -12,6 +12,11 @@
       "note": "A temple certificate discharging its gap hypothesis via a referenced count certificate."
     },
     {
+      "name": "verified_banded_sturm_be",
+      "expect": "VERIFIED",
+      "note": "A correct eigenvalue_count_below claim on a genuinely banded (bandwidth 3) operator, verified via sturm_be's NotTridiagonal fallback to the banded backward-error route."
+    },
+    {
       "name": "abstain_enclosure_shrunk",
       "expect": "ABSTAIN",
       "reason_contains": "tighter",
@@ -53,6 +58,12 @@
       "expect": "ABSTAIN",
       "reason_contains": "not in the bundle",
       "note": "Broken dependency: the temple certificate's referenced count certificate is absent."
+    },
+    {
+      "name": "abstain_banded_sturm_be_tampered",
+      "expect": "ABSTAIN",
+      "reason_contains": "re-derived",
+      "note": "A lying eigenvalue_count_below claim on the same banded (bandwidth 2) sturm_be route; the recount catches it before it ever reaches the tridiagonal fast path."
     },
     {
       "name": "abstain_forged_cycle",

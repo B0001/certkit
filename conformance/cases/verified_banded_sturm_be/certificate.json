@@ -1,0 +1,17 @@
+{
+  "claim": {
+    "beta": "0x1.3396574a43a12p+1",
+    "count": 8,
+    "kind": "eigenvalue_count_below",
+    "operator_ref": "blake2b16:99eecf9a76c668d821379aa7783fdcee"
+  },
+  "content_hash": "blake2b16:ae8207419927ae90f681e9a29e9eaa60",
+  "producer": {
+    "backend": "numpy",
+    "name": "certkit.producer"
+  },
+  "schema": "certkit/1",
+  "witness": {
+    "rule": "sturm_be"
+  }
+}

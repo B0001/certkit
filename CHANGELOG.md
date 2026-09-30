@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### A tight (Temple/inertia) route for complex Hermitian operators
+
+`hermitian_temple_inertia`: the complex analogue of `temple_inertia`, closing
+the gap `certkit-3ta` left open. An interval LDL^H factorization of
+`A - beta*I` over `CIv` (`checker.count_eigenvalues_below_hermitian`) counts
+sign-determined pivots via Sylvester's law of inertia for Hermitian
+congruence, discharging the Temple gap parameter inline exactly like the
+real route does, rather than trusting it from the witness. Needed one new
+primitive in the trusted `interval.py`, `CIv.scale` (multiplication by a real
+interval scalar — the real-scalar sibling `CIv.__truediv__`'s real-divisor
+restriction already had). Tested in `tests/test_complex_temple_inertia.py`
+against `numpy.linalg.eigvalsh`, against the real route on real-embedded
+matrices, and for the usual abstain-not-degrade cases (gap too tight, lying
+`beta`, tampered witness, cross-kind dispatch) (`certkit-1y7`).
+
+### Conformance suite now covers the banded `sturm_be` route
+
+`conformance/` grows from twelve cases to fourteen: `verified_banded_sturm_be`
+(a correct `eigenvalue_count_below` claim on a genuinely banded, bandwidth-3
+operator, verified through `_rule_sturm_be`'s `NotTridiagonal` fallback to
+`count_eigenvalues_below_backward_banded`) and
+`abstain_banded_sturm_be_tampered` (the same route, a lying count claim, must
+abstain). Previously every frozen case was tridiagonal or dense, so a
+regression specific to the banded backward-error path had no conformance
+coverage at all — `tests/` covered it in-process, but a consumer running only
+`conformance/run.py` against a pinned release did not (`certkit-2sc`).
+
 ## 0.2.0 — 2026-09-05
 
 The first pinnable release. Consumers should pin this rather than a git ref.

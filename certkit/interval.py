@@ -226,6 +226,17 @@ class CIv:
         """
         return CIv(self.re / o, self.im / o)
 
+    def scale(self, r: Iv) -> "CIv":
+        """Multiply by a *real* interval scalar: (a+bi)*r = a*r + (b*r)i.
+
+        The complex/real-scalar analogue of `__truediv__` above, and subject
+        to the same restriction: general complex/complex multiplication is
+        `__mul__` below, but scaling by a value already known to be real
+        (a Sylvester-law pivot, a Rayleigh quotient) is a strictly simpler,
+        exact-in-form operation that does not need it.
+        """
+        return CIv(self.re * r, self.im * r)
+
     @property
     def mag_ub(self) -> float:
         """A sound upper bound on |z| for every z in the rectangle.
