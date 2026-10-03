@@ -526,7 +526,8 @@ def certify_lambda_min_hermitian_temple_inertia(
         ]
     )
     vals, vecs = np.linalg.eigh(a)
-    lam1, lam2 = float(vals[0]), float(vals[1])
+    lam1 = float(vals[0])
+    lam2 = float(vals[1]) if n > 1 else lam1 + 1.0  # as `_ground_state`
     x = vecs[:, 0]
 
     # Gap parameter: anywhere strictly between lambda_1 and lambda_2. The

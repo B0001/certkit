@@ -61,7 +61,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 ## Build & Test
 
 ```bash
-uv run --extra dev pytest tests     # 229 passing, ~48s (re-measure — count drifts upward as beads land)
+uv run --extra dev pytest tests     # 230 passing, ~48s (re-measure — count drifts upward as beads land)
 ```
 
 Use `--extra dev`. An environment missing scipy does not error — `producer._ground_state`

@@ -107,6 +107,15 @@ def test_verified_and_sound_against_numpy_eigvalsh(seed):
     assert lo <= truth <= hi
 
 
+def test_one_by_one_operator_verifies():
+    """n=1 has no lambda_2; the producer must still emit a certificate."""
+    cert, op = certify_lambda_min_hermitian_temple_inertia(encode_dense_hermitian([[2.5 + 0j]]))
+    v = check(cert, op)
+    assert v.ok, v.reason
+    lo, hi = v.rederived
+    assert lo <= 2.5 <= hi
+
+
 @pytest.mark.parametrize("seed", range(6))
 def test_count_matches_real_ldlt_on_real_embedded_matrices(seed):
     """A real symmetric matrix embedded as complex (zero imaginary part
