@@ -515,3 +515,41 @@ def test_an_asymmetric_operator_is_refused_without_decode_operator():
     op = DenseSymmetric([[2.0, 1.0, 0.0], [0.0, 2.0, 1.0], [0.0, 1.0, 2.0]])
     with pytest.raises(IntervalError, match="not symmetric"):
         tridiagonal_arrays(op)
+
+
+# -- underflow: a nonzero off-diagonal whose square rounds to exactly 0.0 ---
+# fl(b*b) == 0.0 for 0 < |b| <= 0x1.6a09e667f3bccp-538 (~1.57e-162). `0.0` passes
+# the "normal or exactly zero" guard, but it is not an exact zero: it is a
+# rounding with e0 = -1, outside BackwardError.lean's |e0| <= u hypothesis. The
+# sweep then factors diag(a) instead of A while delta charges only 2u|b|.
+B_UNDERFLOW = float.fromhex("0x1.6a09e667f3bccp-538")  # largest |b| with b*b == 0.0
+
+
+def test_an_off_diagonal_whose_square_underflows_to_zero_is_refused():
+    assert B_UNDERFLOW * B_UNDERFLOW == 0.0
+    with pytest.raises(IntervalError):
+        sweep([0.0, 0.0], [B_UNDERFLOW], B_UNDERFLOW / 2)
+    with pytest.raises(IntervalError):
+        sweep([0.0, 0.0], [-1e-300], 5e-301)
+    sweep([0.0, 0.0], [0.0], 1.0)  # a genuine zero off-diagonal is still exact
+
+
+@pytest.mark.parametrize("encoding", ["dense", "csr", "pauli"])
+def test_a_false_count_through_square_underflow_is_not_verified(encoding):
+    """[[0, b], [b, 0]] has eigenvalues -b and +b, so exactly one lies below b/2;
+    the pre-fix sweep saw diag(0, 0) and VERIFIED a count of 2."""
+    from exact_oracle import dense_rows_to_fractions, exact_count_below
+
+    from certkit.operators import encode_dense, encode_pauli
+
+    b = 1e-200
+    rows = [[0.0, b], [b, 0.0]]
+    enc = {
+        "dense": lambda: encode_dense(rows),
+        "csr": lambda: encode_csr(2, [0, 1, 2], [1, 0], [b, b]),
+        "pauli": lambda: encode_pauli(1, [(b, "X")]),
+    }[encoding]()
+    beta = b / 2
+    assert exact_count_below(dense_rows_to_fractions(rows), Fraction(beta)) == 1
+    lie, _ = certify_count_below_backward(enc, beta, 2)
+    assert not check(lie, enc).ok

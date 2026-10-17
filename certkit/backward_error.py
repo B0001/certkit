@@ -170,7 +170,10 @@ def sweep(diag: list[float], off: list[float], shift: float) -> Sweep:
         else:
             b = off[j - 1]
             s = b * b
-            if not _finite_normal(s):
+            # s == 0.0 is an exact zero only when b == 0.0. For a nonzero b it is
+            # a full underflow (e0 = -1, not |e0| <= u): the sweep would factor
+            # diag(a) while delta charges only 2u|b|.
+            if not _finite_normal(s) or (s == 0.0 and b != 0.0):
                 raise IntervalError(f"squared off-diagonal {j - 1} left the normal range")
             t = s / d if s != 0.0 else 0.0
             if not _finite_normal(t) or (s != 0.0 and t == 0.0):

@@ -36,7 +36,12 @@ pythonpath = ["."]
 # is infeasible for every named approach (matvec-oracle lower bound proven;
 # term-count / banded / FEAST / fill-reducing all ruled out by computation).
 # It needs a human close-or-rescope call, not more worker-hours.
-park = ["certkit-jcb", "certkit-ph1"]
+#
+# certkit-xc5: human re-review of the REVIEW-jcb guard checklist after
+# certkit-vj5 (the ticked 'normal or exactly zero' item admitted a nonzero b
+# whose square underflows to 0.0). Same rule as certkit-jcb: only a human
+# sign-off closes it.
+park = ["certkit-jcb", "certkit-ph1", "certkit-xc5"]
 
 # The Lean beads (8y2.*) need a toolchain the image does not carry. Without a
 # persistent volume every worker re-downloads elan and mathlib and throws it
