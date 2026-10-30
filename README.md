@@ -682,5 +682,33 @@ and the checker refuses it, correctly.
   read — both are Python-loop-faithfulness claims, stay covered by
   `REVIEW-dyi.md`'s human/empirical review and `tests/test_backward.py`'s
   banded section, not by a Lean theorem.
-- A count rule that works matrix-free, which is what would let a large Pauli
-  Hamiltonian use `temple_ref` instead of falling back to Gershgorin.
+
+## Closed: no fourth counting rule
+
+The counting-rule line is finished. This section is its stop-work note
+(portfolio-023), so the question does not get reopened by accident. Three
+rules prove the same gap, and `test_one_temple_certificate_three_counting_rules`
+verifies one Temple certificate, unchanged but for `gap_ref`, against each:
+
+- `inertia`: dense interval LDLᵀ and Sylvester's law of inertia, up to
+  `DENSE_LIMIT`.
+- `sturm`: a Sturm count that stays inside the band.
+- `sturm_be`: the banded factorisation with a runtime-measured backward-error
+  bound in place of enclosure.
+
+A fourth rule that works matrix-free is what would let a large Pauli
+Hamiltonian use `temple_ref` instead of falling back to Gershgorin (see
+"Known limits"). It will not be built:
+
+- Six sessions (`certkit-ph1`, `sandbox-handoffs/certkit-ph1.md`) ruled out
+  every concretely named candidate for the sizes past `DENSE_LIMIT`: the
+  matvec-oracle family by an adversarial lower bound, and term-count, FEAST
+  and fill-reducing sparse LDLᵀ by direct computation.
+- `certkit-k2j` (`sandbox-handoffs/certkit-k2j.md`) closed certified
+  tensor-network/MPO methods: for the general `PauliSumReal` class the
+  question is QMA-hard (Kempe–Kitaev–Regev; Cubitt–Montanaro), and its
+  measurements over `q=8..14` showed volume-law entanglement growth.
+- The portfolio's freeze plan (C3) funds no counting-rule spike unless both
+  current bets fail.
+
+Reopen only with a candidate that none of the above already excludes.
