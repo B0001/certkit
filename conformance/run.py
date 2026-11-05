@@ -31,15 +31,21 @@ def run_case(checker: list[str], case: dict) -> tuple[bool, str]:
         [*checker, "check", str(d / "certificate.json"), str(d / "operator.json")],
         capture_output=True, text=True,
     )
-    got = "VERIFIED" if proc.returncode == 0 else "ABSTAIN"
     output = (proc.stdout + proc.stderr).strip()
+    first = output.splitlines()[0] if output else "(no output)"
+    # 0 is VERIFIED and 1 ABSTAIN. Anything else (certkit exits 2 on a usage,
+    # IO or internal error) is no verdict, so it matches neither.
+    if proc.returncode not in (0, 1):
+        return False, f"checker error (exit {proc.returncode}): {first}"
+    got = "VERIFIED" if proc.returncode == 0 else "ABSTAIN"
 
     if got != case["expect"]:
-        return False, f"expected {case['expect']}, got {got}: {output.splitlines()[0] if output else '(no output)'}"
-    # A case may pin *why* it was refused, so a right answer for a wrong reason still fails.
+        return False, f"expected {case['expect']}, got {got}: {first}"
+    # A case may pin *why* it was refused, so a right answer for a wrong reason
+    # still fails. Verdicts go to stdout; a crash's traceback on stderr is no reason.
     want = case.get("reason_contains")
-    if want and want.lower() not in output.lower():
-        return False, f"{got} as expected, but reason did not mention {want!r}: {output.splitlines()[0] if output else '(no output)'}"
+    if want and want.lower() not in proc.stdout.lower():
+        return False, f"{got} as expected, but reason did not mention {want!r}: {first}"
     return True, got
 
 

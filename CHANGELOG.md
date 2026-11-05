@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Hostile JSON abstains instead of crashing; CLI exit 2 means no verdict
+
+`check()`, `check_bundle()` and `certkit check` used to raise on JSON that no
+producer would emit:
+
+- a lone UTF-16 surrogate (UnicodeEncodeError while sealing);
+- a list or object where a rule name, `operator_ref` or operator `kind`
+  belongs (TypeError);
+- a hex float of 2^1024 or more (OverflowError);
+- nesting too deep for `json` (RecursionError);
+- a complex Hermitian metric operator for `gen_gershgorin_rayleigh`
+  (AttributeError);
+- a bundle that is not a list.
+
+All of them now abstain. `digest()` raises `SchemaError` for input with no
+canonical form, and `h2f()` raises it on overflow. `gen_gershgorin_rayleigh`
+now checks the kind of S. `_verify_uncached` turns any exception it did not
+anticipate into ABSTAIN, naming the exception type.
+
+The CLI now exits 2 for a usage, IO or internal error, so a crash no longer
+looks like ABSTAIN (exit 1). Unparseable input is still a malformed
+certificate and gets ABSTAIN. `conformance/run.py` now fails any case whose
+exit status is neither 0 nor 1. Every ABSTAIN case now pins a
+`reason_contains`, matched against stdout only, so a traceback cannot satisfy
+it. Checker output on the fourteen conformance cases is unchanged, and so is
+`tests/platform_digest.txt` (`certkit-3zr`).
+
 ### A tight (Temple/inertia) route for complex Hermitian operators
 
 `hermitian_temple_inertia`: the complex analogue of `temple_inertia`, closing

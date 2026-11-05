@@ -43,7 +43,7 @@ def h2f(s: str) -> float:
         raise SchemaError(f"expected hex float string, got {type(s).__name__}")
     try:
         x = float.fromhex(s)
-    except ValueError as exc:
+    except (OverflowError, ValueError) as exc:  # OverflowError: '0x1p1024' (certkit-3zr)
         raise SchemaError(f"bad hex float {s!r}") from exc
     if not math.isfinite(x):
         raise SchemaError("non-finite float in certificate")
@@ -55,7 +55,15 @@ def canonical(obj: Any) -> str:
 
 
 def digest(obj: Any) -> str:
-    return hashlib.blake2b(canonical(obj).encode("utf-8"), digest_size=16).hexdigest()
+    try:
+        data = canonical(obj).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as exc:
+        # A lone surrogate (UnicodeEncodeError is a ValueError), nesting too
+        # deep for json, or a non-JSON value has no canonical form, so no
+        # content address. Every caller already treats SchemaError as
+        # "unsealed" or "no such operator" (certkit-3zr).
+        raise SchemaError(f"no canonical JSON form: {type(exc).__name__}: {exc}") from exc
+    return hashlib.blake2b(data, digest_size=16).hexdigest()
 
 
 # -- certificate ----------------------------------------------------------

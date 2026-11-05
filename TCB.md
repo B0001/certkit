@@ -84,6 +84,10 @@ Stated so they are not mistaken for gaps:
   the matrix-free path and get no gap discharge.
 - A pivot that straddles zero raises `IntervalError` and becomes ABSTAIN. This
   is the honest outcome for a near-degenerate gap, not a failure.
+- Input with no canonical JSON form (a lone surrogate, or nesting deeper than
+  `json` handles) cannot be sealed or content-addressed, so it abstains. Any
+  other exception the checker did not anticipate also becomes ABSTAIN, with
+  its type in the reason: `check()` always returns a Verdict (`certkit-3zr`).
 
 In every case the checker declines to answer. None of them can turn a false
 claim into VERIFIED.

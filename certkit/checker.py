@@ -580,6 +580,13 @@ def _rule_gen_gershgorin_rayleigh(op, claim, witness, ctx) -> Verdict:
             rule="gen_gershgorin_rayleigh",
         )
     s_op = decode_operator(s_enc)
+    # _verify_uncached's kind guard sees only the primary operator; a complex S
+    # would reach the real Gershgorin code below (certkit-3zr).
+    if s_op.kind in COMPLEX_OPERATOR_KINDS:
+        return _abstain(
+            f"rule 'gen_gershgorin_rayleigh' is not compatible with metric operator kind {s_op.kind!r}",
+            rule="gen_gershgorin_rayleigh",
+        )
     if s_op.n != op.n:
         return _abstain(
             "metric operator dimension does not match the primary operator",
@@ -955,6 +962,13 @@ def _verify_uncached(cert: Any, ctx: Context) -> Verdict:
         return _abstain(f"schema: {exc}")
     except IntervalError as exc:
         return _abstain(f"numeric: {exc}")
+    except Exception as exc:
+        # The contract is that check() always returns a Verdict. Anything the
+        # clauses above did not anticipate (an unhashable list where a rule
+        # name belongs, say) is a refusal, not a crash, and the reason names
+        # the exception so the gap can get a deliberate check (certkit-3zr).
+        # Every certificate, dependencies included, is verified here.
+        return _abstain(f"internal error: {type(exc).__name__}: {exc}")
 
 
 def check(cert: Any, operator_obj: Any) -> Verdict:
@@ -969,8 +983,8 @@ def check(cert: Any, operator_obj: Any) -> Verdict:
     if isinstance(operator_obj, dict):
         try:
             ops[operator_ref(operator_obj)] = operator_obj
-        except SchemaError:
-            pass
+        except SchemaError as exc:  # no canonical form, so no content address
+            return _abstain(f"operator: {exc}")
     return _verify(cert, Context(ops, {}, {}, ()))
 
 
@@ -981,6 +995,8 @@ def check_bundle(certs: Sequence[Any], operator_encodings: Sequence[Any]) -> dic
     Dependencies are verified on their own terms; a dependency that abstains
     makes every dependent abstain.
     """
+    if not isinstance(certs, (list, tuple)):  # JSON null or 42 is not iterable (certkit-3zr)
+        return {"<unhashed:0>": _abstain("a bundle must be a list of certificates")}
     ops: dict[str, Any] = {}
     for enc in operator_encodings:
         try:

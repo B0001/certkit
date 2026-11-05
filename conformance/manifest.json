@@ -25,17 +25,20 @@
     {
       "name": "abstain_enclosure_shifted",
       "expect": "ABSTAIN",
+      "reason_contains": "disjoint",
       "note": "Enclosure moved off the true eigenvalue; re-derivation does not support it."
     },
     {
       "name": "abstain_unsealed_mutation",
       "expect": "ABSTAIN",
+      "reason_contains": "content hash mismatch",
       "note": "Body mutated without re-sealing. The content hash must catch this before any mathematics runs."
     },
     {
       "name": "abstain_witness_tampered",
       "expect": "ABSTAIN",
-      "note": "Witness vector replaced with zeros; the claim no longer follows from it."
+      "reason_contains": "tighter",
+      "note": "Witness vector perturbed; its larger residual no longer supports the claimed enclosure."
     },
     {
       "name": "abstain_operator_substituted",
@@ -46,11 +49,13 @@
     {
       "name": "abstain_unknown_rule",
       "expect": "ABSTAIN",
+      "reason_contains": "unknown witness rule",
       "note": "Unknown rule names are refused, never ignored."
     },
     {
       "name": "abstain_garbage_input",
       "expect": "ABSTAIN",
+      "reason_contains": "unknown schema version",
       "note": "Malformed input abstains rather than crashing."
     },
     {
@@ -68,12 +73,14 @@
     {
       "name": "abstain_forged_cycle",
       "expect": "ABSTAIN",
-      "note": "A cycle, buildable only by lying about content hashes. Traversal refuses regardless."
+      "reason_contains": "content hash mismatch",
+      "note": "A cycle, buildable only by lying about content hashes, so the seal refuses it before any traversal."
     },
     {
       "name": "abstain_self_reference",
       "expect": "ABSTAIN",
-      "note": "Self-reference is a cycle of length one."
+      "reason_contains": "content hash mismatch",
+      "note": "Self-reference is a cycle of length one; its hash is a lie too, so the seal refuses it."
     }
   ]
 }

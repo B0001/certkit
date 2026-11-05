@@ -493,7 +493,7 @@ certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
 certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
 lean/Certkit/         soundness obligations in Lean 4       9 of 9 proved
-tests/                235 tests: fuzz, backends, composition, counting, adversarial, boundary
+tests/                248 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
 
 The trust boundary is enforced mechanically, not by comment.
@@ -509,6 +509,13 @@ abstain: a shrunk enclosure, a shifted enclosure, an unsealed mutation, a
 perturbed witness vector, a substituted operator, a tampered matrix entry, a
 non-symmetric operator, a rule/claim mismatch, and — the interesting one — an
 inflated `β` that claims a spectral gap the matrix does not have.
+
+`tests/test_hostile_json.py` feeds the checker JSON that no producer would
+emit: a lone UTF-16 surrogate, a list where a rule name belongs, a hex float
+of 2^1024, and nesting 100,000 deep. `check()`, `check_bundle()` and the CLI
+must all return ABSTAIN rather than raise. The CLI's exit status 2 is kept
+for usage, IO and internal errors, so a crash never reads as a refusal
+(`certkit-3zr`).
 
 Note that the operator reference binds the *encoding*, not the abstract
 operator: a CSR and a dense encoding of the same matrix have different refs and

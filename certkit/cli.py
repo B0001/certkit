@@ -2,6 +2,9 @@
 
 The two subcommands are deliberately separable -- `check` needs neither
 numpy nor the producer module, so it can be shipped and audited alone.
+
+Exit status: 0 VERIFIED, 1 ABSTAIN, 2 no verdict at all (a usage, IO or
+internal error), so a crash never reads as a refusal (certkit-3zr).
 """
 
 from __future__ import annotations
@@ -66,10 +69,18 @@ def _cmd_produce(args: argparse.Namespace) -> int:
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
-    from .checker import bundle_verdict, check, check_bundle
+    from .checker import Verdict, bundle_verdict, check, check_bundle
 
-    cert = json.loads(Path(args.certificate).read_text())
-    op = json.loads(Path(args.operator).read_text())
+    loaded = []
+    for path in (args.certificate, args.operator):
+        try:
+            loaded.append(json.loads(Path(path).read_text()))
+        except (ValueError, RecursionError) as exc:
+            # Unparseable is malformed, so ABSTAIN like any malformed
+            # certificate. An unreadable file (OSError) is an error: exit 2.
+            print(Verdict("ABSTAIN", f"schema: {path} is not JSON: {type(exc).__name__}: {exc}"))
+            return 1
+    cert, op = loaded
 
     if isinstance(cert, list):
         results = check_bundle(cert, [op])
@@ -123,8 +134,12 @@ def main(argv: list[str] | None = None) -> int:
     cp.add_argument("-v", "--verbose", action="store_true")
     cp.set_defaults(func=_cmd_check)
 
-    args = p.parse_args(argv)
-    return args.func(args)
+    args = p.parse_args(argv)  # a usage error exits 2 here
+    try:
+        return args.func(args)
+    except Exception as exc:
+        print(f"certkit: error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":  # pragma: no cover

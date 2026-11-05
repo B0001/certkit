@@ -58,11 +58,15 @@ Producer writes two files:
 Checker is invoked as a subprocess, never as a call:
 
 ```sh
-certkit check <certificate.json> <operator.json>     # exit 0 = VERIFIED, 1 = ABSTAIN
+certkit check <certificate.json> <operator.json>     # exit 0 = VERIFIED, 1 = ABSTAIN, 2 = error
 ```
 
 Exit status is the verdict. Anything a consumer needs from the check must be
-on stdout or in the artifact, not returned through a Python object.
+on stdout or in the artifact, not returned through a Python object. Exit 2
+means there is no verdict at all: a usage error, an unreadable file, or an
+internal error. Treat it as not VERIFIED, and as a fault to investigate rather
+than a refusal. Input that is not JSON at all is a malformed certificate, so
+it gets ABSTAIN, not 2.
 
 ## Version compatibility
 
