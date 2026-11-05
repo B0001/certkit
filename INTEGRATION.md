@@ -58,15 +58,34 @@ Producer writes two files:
 Checker is invoked as a subprocess, never as a call:
 
 ```sh
-certkit check <certificate.json> <operator.json>     # exit 0 = VERIFIED, 1 = ABSTAIN, 2 = error
+certkit check --require-kind lambda_min_enclosure --operator-ref <ref> \
+    <certificate.json> <operator.json>     # exit 0 = VERIFIED, 1 = ABSTAIN, 2 = error
 ```
 
-Exit status is the verdict. Anything a consumer needs from the check must be
-on stdout or in the artifact, not returned through a Python object. Exit 2
-means there is no verdict at all: a usage error, an unreadable file, or an
-internal error. Treat it as not VERIFIED, and as a fault to investigate rather
-than a refusal. Input that is not JSON at all is a malformed certificate, so
-it gets ABSTAIN, not 2.
+Exit status is the verdict on the question the command asks. Anything a
+consumer needs from the check must be on stdout or in the artifact, not
+returned through a Python object. Exit 2 means there is no verdict at all: a
+usage error, an unreadable file, or an internal error. Treat it as not
+VERIFIED, and as a fault to investigate rather than a refusal. Input that is
+not JSON at all is a malformed certificate, so it gets ABSTAIN, not 2.
+
+Exit 0 means a claim about the operator file, as a standard eigenproblem,
+verified (`certkit-1vm`). Two options narrow that question, and pencils are
+always refused:
+
+- **`--require-kind`.** Without it, one certificate's claim may be of any kind.
+  On an operator whose smallest eigenvalue is 1, "some eigenvalue lies near 50"
+  exits 0 just as an enclosure of λ_min does, and so do "λ_min ≤ 1e300" and
+  "every eigenvalue ≥ -1e300". The printed line names the kind, but the exit
+  status does not. Pass the kind you will act on. A bundle's root defaults to
+  `lambda_min_enclosure`.
+- **`--operator-ref`.** This pins the operator by content hash, so a swapped
+  operator file abstains.
+- **Pencils.** The command never answers with a pencil verdict. With one
+  operator file the only pencil it could verify is S = A, whose eigenvalues are
+  all 1.
+
+A VERIFIED that answers another question becomes ABSTAIN, exit 1.
 
 ## Version compatibility
 

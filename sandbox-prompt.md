@@ -6,12 +6,16 @@ unsure whether there is work left.
 
 This repo publishes one guarantee:
 
-> If `check()` returns VERIFIED with enclosure `[lo, hi]`, then the true
-> smallest eigenvalue of the operator lies in `[lo, hi]`.
+> If `check()` returns VERIFIED, then the claim of kind `claim_kind` holds for
+> the operator `operator_ref` or, when `metric_ref` is set, for the pencil
+> `A x = λ S x` whose S is the operator `metric_ref`. In particular, a
+> VERIFIED `lambda_min_enclosure` with enclosure `[lo, hi]` and no
+> `metric_ref` means the true smallest eigenvalue of the operator lies in
+> `[lo, hi]`.
 
 Unconditionally — regardless of what produced the claim, including a producer
 that is buggy, non-deterministic, or adversarial. Everything else here is
-subordinate to that sentence.
+subordinate to that guarantee.
 
 **An unsound VERIFIED is the only unacceptable outcome of your session.** Not
 a failing test, not an abstention, not an unfinished bead. If you are ever

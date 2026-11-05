@@ -102,3 +102,9 @@ assumptions in §3, and the hand-maintained correspondence in §4.
 It does not mean the operator is the one you meant to certify, that the
 producer's model is physically right, or that anything outside the claim's own
 enclosure holds.
+
+Nor does it mean the claim is the one you meant. A true claim of another kind,
+or about another operator or pencil, verifies too. The verdict's `claim_kind`,
+`operator_ref` and `metric_ref` say what it is about. `certkit check
+--require-kind ... --operator-ref ...` and `bundle_verdict(..., operator_ref=...,
+metric_ref=...)` refuse anything else (`certkit-1vm`).

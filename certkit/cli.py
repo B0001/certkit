@@ -5,6 +5,11 @@ numpy nor the producer module, so it can be shipped and audited alone.
 
 Exit status: 0 VERIFIED, 1 ABSTAIN, 2 no verdict at all (a usage, IO or
 internal error), so a crash never reads as a refusal (certkit-3zr).
+
+`check` exits 0 only for a claim about the operator file (or the operator
+--operator-ref names) as a standard eigenproblem, never a pencil. The claim may
+be of any kind unless --require-kind names one; a bundle's root defaults to
+lambda_min_enclosure (certkit-1vm).
 """
 
 from __future__ import annotations
@@ -69,7 +74,9 @@ def _cmd_produce(args: argparse.Namespace) -> int:
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
-    from .checker import Verdict, bundle_verdict, check, check_bundle
+    from .checker import Verdict, _about, bundle_verdict, check, check_bundle
+    from .operators import operator_ref
+    from .schema import SchemaError
 
     loaded = []
     for path in (args.certificate, args.operator):
@@ -82,15 +89,28 @@ def _cmd_check(args: argparse.Namespace) -> int:
             return 1
     cert, op = loaded
 
+    # The question asked (certkit-1vm): the operator file's own spectrum, or the
+    # operator --operator-ref pins, and --require-kind's kind if given. With one
+    # operator file a pencil can only be S = A, whose eigenvalues are all 1, so
+    # a pencil verdict is never an answer here.
+    try:
+        want_op = args.operator_ref or operator_ref(op)
+    except SchemaError:  # no content address, so nothing verifies against it
+        want_op = None
     if isinstance(cert, list):
         results = check_bundle(cert, [op])
         for h, v in results.items():
             print(f"  {h[:20]:<22} {v}")
-        verdict = bundle_verdict(results)
-        print(verdict)
+        verdict = bundle_verdict(results, args.require_kind or "lambda_min_enclosure",
+                                 operator_ref=want_op)
     else:
         verdict = check(cert, op)
-        print(verdict)
+        got = (verdict.claim_kind, verdict.operator_ref, verdict.metric_ref)
+        want = (args.require_kind or verdict.claim_kind, want_op, None)
+        if verdict.ok and got != want:
+            verdict = Verdict("ABSTAIN", f"scope: verified {_about(*got)}, "
+                                         f"but asked for {_about(*want)}")
+    print(verdict)
 
     if verdict.rederived and args.verbose:
         print(f"  re-derived: [{verdict.rederived[0]!r}, {verdict.rederived[1]!r}]")
@@ -131,6 +151,15 @@ def main(argv: list[str] | None = None) -> int:
     cp = sub.add_parser("check", help="verify a certificate (trusted side)")
     cp.add_argument("certificate")
     cp.add_argument("operator")
+    cp.add_argument(
+        "--require-kind", metavar="KIND",
+        help="ABSTAIN unless the claim is of this kind, e.g. lambda_min_enclosure "
+             "(default: any kind for one certificate, lambda_min_enclosure for a bundle)",
+    )
+    cp.add_argument(
+        "--operator-ref", metavar="REF",
+        help="ABSTAIN unless the claim is about the operator with this content hash",
+    )
     cp.add_argument("-v", "--verbose", action="store_true")
     cp.set_defaults(func=_cmd_check)
 

@@ -15,6 +15,11 @@ Verdicts are two-valued by design. There is no "probably fine":
 An ABSTAIN is not an error. It is the correct output whenever a proof was not
 produced, and callers are expected to treat it as "no answer".
 
+A VERIFIED is about exactly what its fields name: `claim_kind`, `operator_ref`
+and, for a pencil A x = lambda S x, `metric_ref`. A true claim of another kind,
+or about another operator or pencil, verifies too, so a caller compares those
+fields, not just `ok` (certkit-1vm).
+
 Composition
 -----------
 A witness may discharge a hypothesis by *referencing another certificate* by
@@ -32,7 +37,7 @@ construct. The detection below is defence in depth.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Sequence
 
 from .backward_error import (
@@ -57,6 +62,8 @@ class Verdict:
     enclosure: tuple[float, float] | None = None
     rederived: tuple[float, float] | None = None
     depends_on: tuple[str, ...] = field(default_factory=tuple)
+    operator_ref: str | None = None  # A, the operator the claim is about
+    metric_ref: str | None = None  # S if it is about the pencil A x = lambda S x
 
     @property
     def ok(self) -> bool:
@@ -70,10 +77,12 @@ class Verdict:
         if not self.ok:
             return f"ABSTAIN   {self.reason}"
         dep = f"  <- {len(self.depends_on)} dep(s)" if self.depends_on else ""
+        # A pencil's lambda_min is not A's, so say which this is (certkit-1vm).
+        pencil = f"  of the pencil (A, S), metric_ref {self.metric_ref}" if self.metric_ref else ""
         if self.enclosure is None:
-            return f"VERIFIED  {self.claim_kind} via {self.rule}{dep}"
+            return f"VERIFIED  {self.claim_kind} via {self.rule}{pencil}{dep}"
         lo, hi = self.enclosure
-        return f"VERIFIED  {self.claim_kind} via {self.rule}  [{lo!r}, {hi!r}]{dep}"
+        return f"VERIFIED  {self.claim_kind} via {self.rule}  [{lo!r}, {hi!r}]{pencil}{dep}"
 
 
 def _abstain(reason: str, **kw) -> Verdict:
@@ -624,7 +633,13 @@ def _rule_gen_gershgorin_rayleigh(op, claim, witness, ctx) -> Verdict:
             "(inconsistent witness)",
             rule="gen_gershgorin_rayleigh",
         )
-    return _implies(lo, hi, floor.lo, mu.hi, "lambda_min_enclosure", "gen_gershgorin_rayleigh")
+    # The enclosure is of lambda_min(A, S), not lambda_min(A): bind S to the
+    # verdict. Only this rule reads metric_ref, so it is the only rule that
+    # sets it; a stray metric_ref on any other claim binds nothing (certkit-1vm).
+    return replace(
+        _implies(lo, hi, floor.lo, mu.hi, "lambda_min_enclosure", "gen_gershgorin_rayleigh"),
+        metric_ref=metric_ref,
+    )
 
 
 def _rule_hermitian_gershgorin_rayleigh(op, claim, witness, ctx) -> Verdict:
@@ -954,7 +969,8 @@ def _verify_uncached(cert: Any, ctx: Context) -> Verdict:
                 f"rule {rule!r} is not compatible with operator kind {op.kind!r}",
                 claim_kind=kind, rule=rule,
             )
-        return handler(op, claim, witness, ctx)
+        # Bind the verdict to the operator it is about (certkit-1vm).
+        return replace(handler(op, claim, witness, ctx), operator_ref=op_ref)
 
     except Unresolved as exc:
         return _abstain(f"dependency: {exc}")
@@ -1019,16 +1035,36 @@ def check_bundle(certs: Sequence[Any], operator_encodings: Sequence[Any]) -> dic
     return out
 
 
-def bundle_verdict(results: dict[str, Verdict], kind: str = "lambda_min_enclosure") -> Verdict:
+def _about(kind: str, operator_ref: str | None, metric_ref: str | None) -> str:
+    if metric_ref is None:
+        return f"{kind} about operator_ref {operator_ref}"
+    return f"{kind} about the pencil with operator_ref {operator_ref} and metric_ref {metric_ref}"
+
+
+def bundle_verdict(
+    results: dict[str, Verdict],
+    kind: str = "lambda_min_enclosure",
+    *,
+    operator_ref: str,
+    metric_ref: str | None = None,
+) -> Verdict:
     """The verified top-level claim of the requested kind, or an abstention.
 
     A bundle proves what its root proves; the intermediate certificates are
-    scaffolding. If more than one root of the same kind verifies, the tightest
-    is returned.
+    scaffolding. Only a claim about `operator_ref` counts, as a standard
+    eigenproblem unless `metric_ref` names the S of the pencil A x = lambda S x
+    asked about. A bundle can hold true claims about S or about other operators,
+    and the tightest of those is no answer to this question (certkit-1vm). If
+    more than one root in scope verifies, the tightest is returned.
     """
-    ok = [v for v in results.values() if v.ok and v.claim_kind == kind and v.width is not None]
+    ok = [
+        v for v in results.values()
+        if v.ok and v.claim_kind == kind and v.width is not None
+        and (v.operator_ref, v.metric_ref) == (operator_ref, metric_ref)
+    ]
     if not ok:
         failed = [v for v in results.values() if not v.ok]
-        reason = failed[0].reason if failed else f"no verified {kind} in bundle"
+        reason = failed[0].reason if failed else (
+            f"no verified {_about(kind, operator_ref, metric_ref)} in bundle")
         return _abstain(reason)
     return min(ok, key=lambda v: v.width)

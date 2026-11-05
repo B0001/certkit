@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from certkit.checker import MAX_DEPTH, bundle_verdict, check, check_bundle
-from certkit.operators import decode_operator, encode_dense
+from certkit.operators import decode_operator, encode_dense, operator_ref
 from certkit.producer import (
     certify_bounds_composed,
     certify_count_below,
@@ -33,7 +33,7 @@ def _matrix(n=6, seed=1):
 
 
 def _roots(certs, ops):
-    return bundle_verdict(check_bundle(certs, ops))
+    return bundle_verdict(check_bundle(certs, ops), operator_ref=operator_ref(ops[0]))
 
 
 # -- the composed Temple bound -------------------------------------------
@@ -142,7 +142,7 @@ def test_combine_sandwiches_two_independent_bounds():
     results = check_bundle(certs, ops)
     assert all(v.ok for v in results.values())
 
-    root = bundle_verdict(results)
+    root = bundle_verdict(results, operator_ref=operator_ref(enc))
     assert root.rule == "combine" and len(root.depends_on) == 2
 
     rows = decode_operator(enc).interval_rows()
@@ -213,7 +213,7 @@ def test_deep_chains_are_bounded():
 
 def test_bundle_verdict_reports_a_failure_reason_rather_than_silence():
     certs, ops = certify_lambda_min_composed(_matrix())
-    root = bundle_verdict(check_bundle([certs[1]], ops))
+    root = bundle_verdict(check_bundle([certs[1]], ops), operator_ref=operator_ref(ops[0]))
     assert not root.ok and root.reason
 
 

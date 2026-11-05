@@ -39,6 +39,7 @@ def canon(o):
 
 def in_process(case_dir):
     from certkit.checker import bundle_verdict, check, check_bundle
+    from certkit.operators import operator_ref
 
     try:
         cert = json.loads((case_dir / "certificate.json").read_text())
@@ -46,7 +47,8 @@ def in_process(case_dir):
         if isinstance(cert, list):
             results = check_bundle(cert, [op])
             out = {"bundle": {h: dataclasses.asdict(v) for h, v in results.items()},
-                   "verdict": dataclasses.asdict(bundle_verdict(results))}
+                   "verdict": dataclasses.asdict(
+                       bundle_verdict(results, operator_ref=operator_ref(op)))}
         else:
             out = {"verdict": dataclasses.asdict(check(cert, op))}
     except Exception as e:  # recorded, not hidden: an exception is itself output

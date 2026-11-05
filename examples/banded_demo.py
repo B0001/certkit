@@ -23,7 +23,7 @@ from certkit.checker import bundle_verdict, check, check_bundle
 from certkit.backward_error import count_eigenvalues_below_backward
 from certkit.banded import count_eigenvalues_below_banded
 from certkit.interval import IntervalError
-from certkit.operators import decode_operator
+from certkit.operators import decode_operator, operator_ref
 from certkit.producer import (
     certify_lambda_min,
     certify_lambda_min_backward,
@@ -85,7 +85,8 @@ def main() -> None:
         )
 
         t0 = time.time()
-        root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)))
+        root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)),
+                              operator_ref=operator_ref(enc))
         dt = time.time() - t0
 
         status = "verified" if root.ok else "abstain"
@@ -125,7 +126,8 @@ def main() -> None:
 
     # Who is actually right at n = 400?
     enc = schrodinger_1d(400)
-    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)))
+    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)),
+                          operator_ref=operator_ref(enc))
     lo, hi = exact_ground(enc)
     c_lo, c_hi = root.rederived
     lapack = lapack_ground(enc)

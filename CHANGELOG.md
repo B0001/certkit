@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### A VERIFIED names its claim kind, operator and pencil, and callers can require them
+
+`check()` and `certkit check` verified any true claim, and nothing bound the
+verdict to the question the caller meant (`certkit-1vm`):
+
+- On an operator whose smallest eigenvalue is 1, three claims printed VERIFIED
+  and exited 0: a `residual` claim that some eigenvalue lies in [49.5, 50.5], a
+  `rayleigh` upper bound of 1e300 and a `gershgorin` lower bound of -1e300.
+- A `gen_gershgorin_rayleigh` claim with `metric_ref` equal to `operator_ref`
+  printed `VERIFIED lambda_min_enclosure ... [0.4, 1.1]` for an A whose
+  smallest eigenvalue is 100. With S = A every eigenvalue of the pencil is 1,
+  so the claim is true of the pencil and false as read.
+- `bundle_verdict` returned the tightest VERIFIED of the requested kind about
+  any operator or pencil in the bundle. A pencil caller who passed [A, S] got
+  λ_min(S) = 1.990, while λ_min(A, S) = 49.84.
+
+What changed:
+
+- `Verdict` has two new fields, `operator_ref` and `metric_ref`, filled from
+  the claim. `metric_ref` is None unless the verdict is about the pencil
+  A x = λ S x. Only `gen_gershgorin_rayleigh` sets it, because it is the only
+  rule that reads S. A claim under any other rule that names a `metric_ref` is
+  still a claim about A alone. A pencil verdict prints
+  `of the pencil (A, S), metric_ref ...`.
+- `bundle_verdict(results, kind, *, operator_ref, metric_ref=None)` returns
+  only a verdict about that operator. It treats the operator as a standard
+  eigenproblem unless `metric_ref` names the pencil's S.
+- `certkit check --require-kind KIND --operator-ref REF` turns a VERIFIED of
+  another kind, or about another operator, into ABSTAIN with exit 1. For one
+  certificate the reason starts `scope:`.
+- `certkit check` no longer answers with a pencil verdict. With one operator
+  file the pencil can only be S = A.
+- The README guarantee is now stated per claim kind and for pencils.
+  INTEGRATION.md and TCB.md say what exit 0 does and does not mean.
+
+**What callers must change:**
+
+- **`bundle_verdict(results)` now raises TypeError.** Pass the operator you
+  mean: `bundle_verdict(results, operator_ref=operator_ref(a_enc))`. For a
+  pencil, also pass `metric_ref=operator_ref(s_enc)`.
+- **Callers of `check()` that read `verdict.enclosure` as the smallest
+  eigenvalue** must also check `verdict.claim_kind == "lambda_min_enclosure"`
+  and `verdict.metric_ref is None`.
+- **Consumers of `certkit check`** should pass
+  `--require-kind lambda_min_enclosure`, or whatever kind they act on. Without
+  it, exit 0 for one certificate still means "a true claim of the printed
+  kind".
+- **Pencil certificates checked through the CLI** now exit 1 where they used
+  to exit 0. Such a certificate can only have verified with S = A.
+- **Code that compares or serialises `Verdict`** sees the two new fields. They
+  are the only reason `tests/platform_digest.txt` was regenerated: no verdict,
+  and no CLI output, changed on the conformance cases.
+
+The certificate schema is unchanged. A distinct claim kind for pencils would
+let `--require-kind` alone tell λ_min(A, S) from λ_min(A). That is a schema
+change and needs a coordinated release, so it is left as a follow-up.
+
 ### Hostile JSON abstains instead of crashing; CLI exit 2 means no verdict
 
 `check()`, `check_bundle()` and `certkit check` used to raise on JSON that no

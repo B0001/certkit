@@ -17,7 +17,7 @@ import pytest
 from certkit.banded import MAX_BANDWIDTH, count_eigenvalues_below_banded
 from certkit.checker import bundle_verdict, check, check_bundle, count_eigenvalues_below
 from certkit.interval import IntervalError
-from certkit.operators import decode_operator, encode_csr
+from certkit.operators import decode_operator, encode_csr, operator_ref
 from certkit.producer import (
     certify_count_below,
     certify_count_below_sturm,
@@ -120,7 +120,8 @@ def test_banded_route_verifies_far_beyond_the_dense_ceiling():
 
     n = 1000
     enc = schrodinger_1d(n)
-    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)))
+    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)),
+                          operator_ref=operator_ref(enc))
     assert root.ok and root.rule == "temple_ref"
 
     lo, hi = exact_lambda_min(enc)
@@ -187,7 +188,8 @@ def test_enclosure_contains_the_exact_eigenvalue():
     from fractions import Fraction
 
     enc = schrodinger_1d(120)
-    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)))
+    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)),
+                          operator_ref=operator_ref(enc))
     assert root.ok
     lo, hi = exact_lambda_min(enc)
     c_lo, c_hi = root.rederived
@@ -204,7 +206,8 @@ def test_the_certified_interval_can_be_narrower_than_lapack_error():
     from fractions import Fraction
 
     enc = schrodinger_1d(120)
-    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)))
+    root = bundle_verdict(check_bundle(*certify_lambda_min_banded(enc)),
+                          operator_ref=operator_ref(enc))
     assert root.ok
     c_lo, c_hi = root.rederived
 
@@ -242,8 +245,9 @@ def test_temple_accepts_either_count_certificate():
     temple_sturm["witness"]["gap_ref"] = count_sturm["content_hash"]
     temple_sturm = seal(temple_sturm)
 
-    a = bundle_verdict(check_bundle([count_dense, temple_dense], ops))
-    b = bundle_verdict(check_bundle([count_sturm, temple_sturm], ops))
+    ref = operator_ref(enc)
+    a = bundle_verdict(check_bundle([count_dense, temple_dense], ops), operator_ref=ref)
+    b = bundle_verdict(check_bundle([count_sturm, temple_sturm], ops), operator_ref=ref)
     assert a.ok and b.ok
     assert a.rederived == b.rederived  # identical conclusion, different provenance
 

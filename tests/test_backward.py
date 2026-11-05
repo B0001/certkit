@@ -27,7 +27,7 @@ from certkit.backward_error import (
 from certkit.banded import MAX_BANDWIDTH, count_eigenvalues_below_banded
 from certkit.checker import bundle_verdict, check, check_bundle
 from certkit.interval import IntervalError
-from certkit.operators import DenseSymmetric, decode_operator, encode_csr
+from certkit.operators import DenseSymmetric, decode_operator, encode_csr, operator_ref
 from certkit.producer import (
     certify_count_below,
     certify_count_below_backward,
@@ -398,7 +398,8 @@ def test_succeeds_on_laplacians_where_the_interval_route_cannot(n):
 
 def test_certified_pipeline_reaches_large_operators():
     enc = schrodinger_1d(10000)
-    root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)))
+    root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)),
+                          operator_ref=operator_ref(enc))
     assert root.ok and root.rule == "temple_ref"
 
 
@@ -415,7 +416,8 @@ def test_ground_state_eigenvector_is_no_longer_the_binding_constraint():
     enclosure from scratch.
     """
     enc = schrodinger_1d(100_000)
-    root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)))
+    root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)),
+                          operator_ref=operator_ref(enc))
     assert root.ok and root.rule == "temple_ref"
     lo, hi = root.rederived
     assert float(hi) - float(lo) < 1e-9
@@ -423,7 +425,8 @@ def test_ground_state_eigenvector_is_no_longer_the_binding_constraint():
 
 def test_enclosure_contains_the_exact_eigenvalue_on_a_laplacian():
     enc = laplacian_1d(200)
-    root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)))
+    root = bundle_verdict(check_bundle(*certify_lambda_min_backward(enc)),
+                          operator_ref=operator_ref(enc))
     assert root.ok
     lo, hi = exact_lambda_min(enc)
     c_lo, c_hi = root.rederived
@@ -455,7 +458,8 @@ def test_one_temple_certificate_three_counting_rules():
         node = copy.deepcopy(temple)
         node["witness"]["gap_ref"] = dep["content_hash"]
         node = seal(node)
-        results.append(bundle_verdict(check_bundle([dep, node], ops)))
+        results.append(bundle_verdict(check_bundle([dep, node], ops),
+                                      operator_ref=operator_ref(enc)))
 
     assert all(v.ok for v in results)
     assert len({v.rederived for v in results}) == 1

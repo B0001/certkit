@@ -17,6 +17,7 @@ import copy
 import numpy as np
 
 from certkit.checker import bundle_verdict, check_bundle
+from certkit.operators import operator_ref
 from certkit.producer import (
     certify_bounds_composed,
     certify_lambda_min_composed,
@@ -29,7 +30,7 @@ def show(title: str, certs, ops) -> None:
     results = check_bundle(certs, ops)
     for h, v in results.items():
         print(f"  {h[:18]:<20} {v}")
-    print(f"  root: {bundle_verdict(results)}\n")
+    print(f"  root: {bundle_verdict(results, operator_ref=operator_ref(ops[0]))}\n")
 
 
 def main() -> None:

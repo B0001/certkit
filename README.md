@@ -14,8 +14,27 @@ a real symmetric operator, across dense, sparse, and matrix-free backends.
 
 ## The guarantee
 
-> If `check()` returns VERIFIED with enclosure `[lo, hi]`, then the true
-> smallest eigenvalue of the operator lies in `[lo, hi]`.
+> If `check()` returns VERIFIED, then the claim of kind `claim_kind` holds for
+> the operator `operator_ref` or, when `metric_ref` is set, for the pencil
+> `A x = λ S x` whose S is the operator `metric_ref`. For each kind:
+
+| `claim_kind` | VERIFIED means |
+| --- | --- |
+| `lambda_min_enclosure` | the smallest eigenvalue of the operator lies in `[lo, hi]` |
+| `lambda_min_enclosure`, `metric_ref` set | the smallest eigenvalue of the pencil lies in `[lo, hi]`; that is not the smallest eigenvalue of A |
+| `lambda_min_upper_bound` | the smallest eigenvalue is at most `bound` |
+| `spectrum_lower_bound` | every eigenvalue is at least `bound` |
+| `spectrum_contains` | *some* eigenvalue lies in `[lo, hi]`, not necessarily the smallest |
+| `eigenvalue_count_below` | exactly `count` eigenvalues lie strictly below `beta` |
+
+`[lo, hi]` is the verdict's `enclosure`, and `bound` is both of its ends;
+`count` and `beta` are in the certificate's claim. A true claim of any kind,
+about any operator supplied, can verify. So `ok` alone does not say that the
+smallest eigenvalue of *your* operator lies in `[lo, hi]`: check `claim_kind`,
+`operator_ref` and `metric_ref` as well. `bundle_verdict(results, kind,
+operator_ref=..., metric_ref=None)` does this for a bundle, and
+`certkit check --require-kind KIND --operator-ref REF` does it on the command
+line, where a pencil verdict is never the answer (`certkit-1vm`).
 
 This holds regardless of what the producer did — even if the producer is buggy,
 non-deterministic, or adversarial. It rests on four things:
@@ -184,6 +203,14 @@ interval quotient of the two Gershgorin enclosures, for *every* nonzero x,
 including the one that minimizes the generalized Rayleigh quotient. S = I
 collapses this back to `gershgorin_rayleigh` exactly, since dividing by the
 degenerate interval [1, 1] is a no-op.
+
+The verdict says which problem it answers. `metric_ref` is set only on a
+pencil verdict, which prints as `... of the pencil (A, S), metric_ref ...`,
+because λ_min(A, S) is not λ_min(A). `bundle_verdict` returns a pencil verdict
+only to a caller who passes that `metric_ref`. `certkit check` takes one
+operator file, so the only pencil it could verify is S = A, whose eigenvalues
+are all 1: a true claim that reads as λ_min(A). It abstains on every pencil
+verdict instead (`certkit-1vm`).
 
 S's positive-definiteness is never assumed: the rule proceeds only once
 Gershgorin proves S's own spectrum is strictly positive, and abstains
@@ -379,7 +406,8 @@ That is the case for having a checker, in one table.
 ```bash
 python -m certkit.cli produce --n 10 --seed 3 --out out         # dense, tight route
 python -m certkit.cli produce --tfim 11 --rule gershgorin_rayleigh --out ham
-python -m certkit.cli check out/certificate.json out/operator.json -v
+python -m certkit.cli check out/certificate.json out/operator.json -v \
+    --require-kind lambda_min_enclosure
 ```
 
 ```
@@ -396,8 +424,8 @@ from certkit.checker import check
 from certkit.producer import certify_lambda_min, tfim_hamiltonian
 
 verdict = check(*certify_lambda_min(tfim_hamiltonian(6)))
-if verdict.ok:
-    lo, hi = verdict.enclosure
+if verdict.ok and verdict.claim_kind == "lambda_min_enclosure" and verdict.metric_ref is None:
+    lo, hi = verdict.enclosure  # the smallest eigenvalue lies in [lo, hi]
 ```
 
 ## Writing a producer
@@ -493,7 +521,7 @@ certkit/backward_error.py  float sweep + runtime delta       TRUSTED
 certkit/checker.py    re-derivation and verdicts            TRUSTED
 certkit/producer.py   numpy/scipy, Lanczos + LAPACK, emits witnesses  untrusted
 lean/Certkit/         soundness obligations in Lean 4       9 of 9 proved
-tests/                248 tests: fuzz, backends, composition, counting, adversarial, boundary
+tests/                255 tests: fuzz, backends, composition, counting, adversarial, boundary
 ```
 
 The trust boundary is enforced mechanically, not by comment.
@@ -516,6 +544,11 @@ of 2^1024, and nesting 100,000 deep. `check()`, `check_bundle()` and the CLI
 must all return ABSTAIN rather than raise. The CLI's exit status 2 is kept
 for usage, IO and internal errors, so a crash never reads as a refusal
 (`certkit-3zr`).
+
+`tests/test_verdict_scope.py` covers true claims that answer the wrong
+question: a claim of another kind, a pencil with S = A, a `metric_ref` that its
+rule never reads, and a bundle whose tightest VERIFIED is about S rather than
+the pencil the caller asked about (`certkit-1vm`).
 
 Note that the operator reference binds the *encoding*, not the abstract
 operator: a CSR and a dense encoding of the same matrix have different refs and

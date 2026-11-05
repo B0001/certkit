@@ -37,7 +37,7 @@ import pytest
 from certkit.banded import count_eigenvalues_below_banded
 from certkit.checker import bundle_verdict, check, check_bundle, count_eigenvalues_below
 from certkit.interval import IntervalError
-from certkit.operators import DENSE_LIMIT, decode_operator, encode_csr
+from certkit.operators import DENSE_LIMIT, decode_operator, encode_csr, operator_ref
 from certkit.producer import (
     certify_count_below_sturm,
     certify_lambda_min,
@@ -144,7 +144,7 @@ def test_banded_lambda_min_enclosure_contains_exact_rational_truth(bandwidth):
     a = _banded_matrix(20, bandwidth, seed=300 + bandwidth)
     enc = _to_csr(a)
     certs, ops = certify_lambda_min_banded(enc)
-    root = bundle_verdict(check_bundle(certs, ops))
+    root = bundle_verdict(check_bundle(certs, ops), operator_ref=operator_ref(enc))
     assert root.ok, root.reason
     assert root.rule == "temple_ref"
     c_lo, c_hi = root.rederived
